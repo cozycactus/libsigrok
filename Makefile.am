@@ -318,6 +318,12 @@ src_libdrivers_la_SOURCES += \
 	src/hardware/fx2lafw/protocol.c \
 	src/hardware/fx2lafw/api.c
 endif
+if HW_FX3KIT
+src_libdrivers_la_SOURCES += \
+	src/hardware/fx3kit/protocol.h \
+	src/hardware/fx3kit/protocol.c \
+	src/hardware/fx3kit/api.c
+endif
 if HW_GMC_MH_1X_2X
 src_libdrivers_la_SOURCES += \
 	src/hardware/gmc-mh-1x-2x/protocol.h \
