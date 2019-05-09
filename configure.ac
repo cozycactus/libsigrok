@@ -264,18 +264,18 @@ SR_DRIVER([Fluke 45], [fluke-45])
 SR_DRIVER([Fluke DMM], [fluke-dmm], [serial_comm])
 SR_DRIVER([FTDI LA], [ftdi-la], [libusb libftdi])
 SR_DRIVER([fx2lafw], [fx2lafw], [libusb])
-<<<<<<< HEAD
+
 SR_DRIVER([fx3kit], [fx3kit])
 SR_DRIVER([GMC MH 1x/2x], [gmc-mh-1x-2x], [libserialport])
 SR_DRIVER([GW Instek GDS-800], [gwinstek-gds-800], [libserialport])
 SR_DRIVER([GW Instek GPD], [gwinstek-gpd], [libserialport])
 SR_DRIVER([Hameg HMO], [hameg-hmo], [libserialport])
-=======
+
 SR_DRIVER([GMC MH 1x/2x], [gmc-mh-1x-2x], [serial_comm])
 SR_DRIVER([GW Instek GDS-800], [gwinstek-gds-800], [serial_comm])
 SR_DRIVER([GW Instek GPD], [gwinstek-gpd], [serial_comm])
 SR_DRIVER([Hameg HMO], [hameg-hmo], [serial_comm])
->>>>>>> origin/master
+
 SR_DRIVER([Hantek 4032L], [hantek-4032l], [libusb])
 SR_DRIVER([Hantek 6xxx], [hantek-6xxx], [libusb])
 SR_DRIVER([Hantek DSO], [hantek-dso], [libusb])
