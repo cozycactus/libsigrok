@@ -24,6 +24,7 @@
 #include "protocol.h"
 #include <math.h>
 
+<<<<<<< HEAD
 #define FW_CHUNKSIZE (4 * 1024)
 
 static int fx3_reset(struct libusb_device_handle *hdl, int set_clear)
@@ -179,6 +180,8 @@ static int fx3_upload_firmware(struct sr_context *ctx, libusb_device *dev,
 }
 
 
+=======
+>>>>>>> fx3kit : test commit
 static const struct fx3kit_profile supported_fx3[] = {
 	/*
 	 * Cypress SuperSpeed Explorer Kit (CYUSB3KIT-003)
@@ -272,6 +275,7 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 	const char *conn;
 	char manufacturer[64], product[64], serial_num[64], connection_id[64];
 	char channel_name[16];
+<<<<<<< HEAD
 
 	drvc = di->context;
 
@@ -459,6 +463,185 @@ static int dev_clear(const struct sr_dev_driver *di)
 	return std_dev_clear_with_callback(di, (std_dev_clear_callback)clear_helper);
 }
 
+=======
+
+	drvc = di->context;
+
+	conn = NULL;
+	for (l = options; l; l = l->next) {
+		src = l->data;
+		switch (src->key) {
+		case SR_CONF_CONN:
+			conn = g_variant_get_string(src->data, NULL);
+			break;
+		}
+	}
+	if (conn)
+		conn_devices = sr_usb_find(drvc->sr_ctx->libusb_ctx, conn);
+	else
+		conn_devices = NULL;
+
+	/* Find all fx3kit compatible devices and upload firmware to them. */
+	devices = NULL;
+	libusb_get_device_list(drvc->sr_ctx->libusb_ctx, &devlist);
+	for (i = 0; devlist[i]; i++) {
+		if (conn) {
+			usb = NULL;
+			for (l = conn_devices; l; l = l->next) {
+				usb = l->data;
+				if (usb->bus == libusb_get_bus_number(devlist[i])
+					&& usb->address == libusb_get_device_address(devlist[i]))
+					break;
+			}
+			if (!l)
+				/* This device matched none of the ones that
+				 * matched the conn specification. */
+				continue;
+		}
+
+		libusb_get_device_descriptor( devlist[i], &des);
+
+		if (!is_plausible(&des))
+			continue;
+
+		if ((ret = libusb_open(devlist[i], &hdl)) < 0) {
+			sr_warn("Failed to open potential device with "
+				"VID:PID %04x:%04x: %s.", des.idVendor,
+				des.idProduct, libusb_error_name(ret));
+			continue;
+		}
+
+		if (des.iManufacturer == 0) {
+			manufacturer[0] = '\0';
+		} else if ((ret = libusb_get_string_descriptor_ascii(hdl,
+				des.iManufacturer, (unsigned char *) manufacturer,
+				sizeof(manufacturer))) < 0) {
+			sr_warn("Failed to get manufacturer string descriptor: %s.",
+				libusb_error_name(ret));
+			continue;
+		}
+
+		if (des.iProduct == 0) {
+			product[0] = '\0';
+		} else if ((ret = libusb_get_string_descriptor_ascii(hdl,
+				des.iProduct, (unsigned char *) product,
+				sizeof(product))) < 0) {
+			sr_warn("Failed to get product string descriptor: %s.",
+				libusb_error_name(ret));
+			continue;
+		}
+
+		if (des.iSerialNumber == 0) {
+			serial_num[0] = '\0';
+		} else if ((ret = libusb_get_string_descriptor_ascii(hdl,
+				des.iSerialNumber, (unsigned char *) serial_num,
+				sizeof(serial_num))) < 0) {
+			sr_warn("Failed to get serial number string descriptor: %s.",
+				libusb_error_name(ret));
+			continue;
+		}
+
+		libusb_close(hdl);
+
+		if (usb_get_port_path(devlist[i], connection_id, sizeof(connection_id)) < 0)
+			continue;
+
+		prof = NULL;
+		for (j = 0; supported_fx3[j].vid; j++) {
+			if (des.idVendor == supported_fx3[j].vid &&
+					des.idProduct == supported_fx3[j].pid &&
+					(!supported_fx3[j].usb_manufacturer ||
+					 !strcmp(manufacturer, supported_fx3[j].usb_manufacturer)) &&
+					(!supported_fx3[j].usb_product ||
+					 !strcmp(product, supported_fx3[j].usb_product))) {
+				prof = &supported_fx3[j];
+				break;
+			}
+		}
+
+		if (!prof)
+			continue;
+
+		sdi = g_malloc0(sizeof(struct sr_dev_inst));
+		sdi->status = SR_ST_INITIALIZING;
+		sdi->vendor = g_strdup(prof->vendor);
+		sdi->model = g_strdup(prof->model);
+		sdi->version = g_strdup(prof->model_version);
+		sdi->serial_num = g_strdup(serial_num);
+		sdi->connection_id = g_strdup(connection_id);
+
+		/* Fill in channellist according to this device's profile. */
+		num_logic_channels =
+			prof->dev_caps & DEV_CAPS_32BIT ? 32 :
+			(prof->dev_caps & DEV_CAPS_24BIT ? 24 :
+			 (prof->dev_caps & DEV_CAPS_16BIT ? 16 : 8));
+		num_analog_channels = prof->dev_caps & DEV_CAPS_AX_ANALOG ? 1 : 0;
+
+		/* Logic channels, all in one channel group. */
+		cg = g_malloc0(sizeof(struct sr_channel_group));
+		cg->name = g_strdup("Logic");
+		for (j = 0; j < num_logic_channels; j++) {
+			sprintf(channel_name, "D%d", j);
+			ch = sr_channel_new(sdi, j, SR_CHANNEL_LOGIC,
+						TRUE, channel_name);
+			cg->channels = g_slist_append(cg->channels, ch);
+		}
+		sdi->channel_groups = g_slist_append(NULL, cg);
+
+		for (j = 0; j < num_analog_channels; j++) {
+			snprintf(channel_name, 16, "A%d", j);
+			ch = sr_channel_new(sdi, j + num_logic_channels,
+					SR_CHANNEL_ANALOG, TRUE, channel_name);
+
+			/* Every analog channel gets its own channel group. */
+			cg = g_malloc0(sizeof(struct sr_channel_group));
+			cg->name = g_strdup(channel_name);
+			cg->channels = g_slist_append(NULL, ch);
+			sdi->channel_groups = g_slist_append(sdi->channel_groups, cg);
+		}
+
+		devc = fx3kit_dev_new();
+		devc->profile = prof;
+		sdi->priv = devc;
+		devices = g_slist_append(devices, sdi);
+
+		devc->samplerates = samplerates;
+		devc->num_samplerates = ARRAY_SIZE(samplerates);
+		if (!(prof->dev_caps & DEV_CAPS_FX3))
+			devc->num_samplerates -= NUM_FX3_RATES;
+		has_firmware = usb_match_manuf_prod(devlist[i],
+				"sigrok", "fx3lafw");
+
+		if (has_firmware) {
+			/* Already has the firmware, so fix the new address. */
+			sr_dbg("Found an fx3kit device.");
+			sdi->status = SR_ST_INACTIVE;
+			sdi->inst_type = SR_INST_USB;
+			sdi->conn = sr_usb_dev_inst_new(libusb_get_bus_number(devlist[i]),
+					libusb_get_device_address(devlist[i]), NULL);
+		} else {
+			if (ezusb_upload_firmware(drvc->sr_ctx, devlist[i],
+					USB_CONFIGURATION, prof->firmware,
+					(prof->dev_caps & DEV_CAPS_FX3)) == SR_OK)
+				/* Store when this device's FW was updated. */
+				devc->fw_updated = g_get_monotonic_time();
+			else
+				sr_err("Firmware upload failed for "
+				       "device %d.%d (logical).",
+				       libusb_get_bus_number(devlist[i]),
+				       libusb_get_device_address(devlist[i]));
+			sdi->inst_type = SR_INST_USB;
+			sdi->conn = sr_usb_dev_inst_new(libusb_get_bus_number(devlist[i]),
+					0xff, NULL);
+		}
+	}
+	libusb_free_device_list(devlist, 1);
+	g_slist_free_full(conn_devices, (GDestroyNotify)sr_usb_dev_inst_free);
+
+	return std_scan_complete(di, devices);
+}
+
+>>>>>>> fx3kit : test commit
 
 static int dev_open(struct sr_dev_inst *sdi)
 {
