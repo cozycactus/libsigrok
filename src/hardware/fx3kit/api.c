@@ -19,25 +19,278 @@
 
 #include <config.h>
 #include "protocol.h"
+#include <math.h>
+
+static const struct fx3kit_profile supported_fx3[] = {
+	/*
+	 * Cypress SuperSpeed Explorer Kit (CYUSB3KIT-003)
+	 */
+	{ 0x04b4, 0x00f3, "Cypress", "SuperSpeed Explorer Kit", NULL,
+		"fx3lafw-cypress-fx3.fw",
+		DEV_CAPS_FX3 | DEV_CAPS_32BIT, NULL, NULL },
+
+	ALL_ZERO
+};
 
 static struct sr_dev_driver fx3kit_driver_info;
+
+static const uint32_t scanopts[] = {
+	SR_CONF_CONN,
+};
+
+static const uint32_t drvopts[] = {
+	SR_CONF_LOGIC_ANALYZER,
+};
+
+static const uint32_t devopts[] = {
+	SR_CONF_CONTINUOUS,
+	SR_CONF_LIMIT_SAMPLES | SR_CONF_GET | SR_CONF_SET,
+	SR_CONF_CONN | SR_CONF_GET,
+	SR_CONF_SAMPLERATE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
+	SR_CONF_TRIGGER_MATCH | SR_CONF_LIST,
+	SR_CONF_CAPTURE_RATIO | SR_CONF_GET | SR_CONF_SET,
+};
+
+static const int32_t trigger_matches[] = {
+	SR_TRIGGER_ZERO,
+	SR_TRIGGER_ONE,
+	SR_TRIGGER_RISING,
+	SR_TRIGGER_FALLING,
+	SR_TRIGGER_EDGE,
+};
+
+static const uint64_t samplerates[] = {
+	SR_KHZ(200),
+	SR_KHZ(250),
+	SR_KHZ(500),
+	SR_MHZ(1),
+	SR_MHZ(2),
+	SR_MHZ(3),
+	SR_MHZ(4),
+	SR_MHZ(6),
+	SR_MHZ(8),
+	SR_MHZ(12),
+	SR_MHZ(16),
+	SR_MHZ(24),
+	SR_MHZ(32),
+	SR_MHZ(48),
+	SR_MHZ(64),
+	SR_MHZ(96),
+	SR_MHZ(192),
+#define NUM_FX3_RATES 5
+};
+
+static gboolean is_plausible(const struct libusb_device_descriptor *des)
+{
+	int i;
+
+	for (i = 0; supported_fx3[i].vid; i++) {
+		if (des->idVendor != supported_fx3[i].vid)
+			continue;
+		if (des->idProduct == supported_fx3[i].pid)
+			return TRUE;
+	}
+
+	return FALSE;
+}
 
 static GSList *scan(struct sr_dev_driver *di, GSList *options)
 {
 	struct drv_context *drvc;
-	GSList *devices;
+	struct dev_context *devc;
+	struct sr_dev_inst *sdi;
+	struct sr_usb_dev_inst *usb;
+	struct sr_channel *ch;
+	struct sr_channel_group *cg;
+	struct sr_config *src;
+	const struct fx3kit_profile *prof;
+	GSList *l, *devices, *conn_devices;
+	gboolean has_firmware;
+	struct libusb_device_descriptor des;
+	libusb_device **devlist;
+	struct libusb_device_handle *hdl;
+	int ret, i, j;
+	int num_logic_channels = 0, num_analog_channels = 0;
+	const char *conn;
+	char manufacturer[64], product[64], serial_num[64], connection_id[64];
+	char channel_name[16];
 
-	(void)options;
-
-	devices = NULL;
 	drvc = di->context;
-	drvc->instances = NULL;
 
-	/* TODO: scan for devices, either based on a SR_CONF_CONN option
-	 * or on a USB scan. */
+	conn = NULL;
+	for (l = options; l; l = l->next) {
+		src = l->data;
+		switch (src->key) {
+		case SR_CONF_CONN:
+			conn = g_variant_get_string(src->data, NULL);
+			break;
+		}
+	}
+	if (conn)
+		conn_devices = sr_usb_find(drvc->sr_ctx->libusb_ctx, conn);
+	else
+		conn_devices = NULL;
 
-	return devices;
+	/* Find all fx3kit compatible devices and upload firmware to them. */
+	devices = NULL;
+	libusb_get_device_list(drvc->sr_ctx->libusb_ctx, &devlist);
+	for (i = 0; devlist[i]; i++) {
+		if (conn) {
+			usb = NULL;
+			for (l = conn_devices; l; l = l->next) {
+				usb = l->data;
+				if (usb->bus == libusb_get_bus_number(devlist[i])
+					&& usb->address == libusb_get_device_address(devlist[i]))
+					break;
+			}
+			if (!l)
+				/* This device matched none of the ones that
+				 * matched the conn specification. */
+				continue;
+		}
+
+		libusb_get_device_descriptor( devlist[i], &des);
+
+		if (!is_plausible(&des))
+			continue;
+
+		if ((ret = libusb_open(devlist[i], &hdl)) < 0) {
+			sr_warn("Failed to open potential device with "
+				"VID:PID %04x:%04x: %s.", des.idVendor,
+				des.idProduct, libusb_error_name(ret));
+			continue;
+		}
+
+		if (des.iManufacturer == 0) {
+			manufacturer[0] = '\0';
+		} else if ((ret = libusb_get_string_descriptor_ascii(hdl,
+				des.iManufacturer, (unsigned char *) manufacturer,
+				sizeof(manufacturer))) < 0) {
+			sr_warn("Failed to get manufacturer string descriptor: %s.",
+				libusb_error_name(ret));
+			continue;
+		}
+
+		if (des.iProduct == 0) {
+			product[0] = '\0';
+		} else if ((ret = libusb_get_string_descriptor_ascii(hdl,
+				des.iProduct, (unsigned char *) product,
+				sizeof(product))) < 0) {
+			sr_warn("Failed to get product string descriptor: %s.",
+				libusb_error_name(ret));
+			continue;
+		}
+
+		if (des.iSerialNumber == 0) {
+			serial_num[0] = '\0';
+		} else if ((ret = libusb_get_string_descriptor_ascii(hdl,
+				des.iSerialNumber, (unsigned char *) serial_num,
+				sizeof(serial_num))) < 0) {
+			sr_warn("Failed to get serial number string descriptor: %s.",
+				libusb_error_name(ret));
+			continue;
+		}
+
+		libusb_close(hdl);
+
+		if (usb_get_port_path(devlist[i], connection_id, sizeof(connection_id)) < 0)
+			continue;
+
+		prof = NULL;
+		for (j = 0; supported_fx3[j].vid; j++) {
+			if (des.idVendor == supported_fx3[j].vid &&
+					des.idProduct == supported_fx3[j].pid &&
+					(!supported_fx3[j].usb_manufacturer ||
+					 !strcmp(manufacturer, supported_fx3[j].usb_manufacturer)) &&
+					(!supported_fx3[j].usb_product ||
+					 !strcmp(product, supported_fx3[j].usb_product))) {
+				prof = &supported_fx3[j];
+				break;
+			}
+		}
+
+		if (!prof)
+			continue;
+
+		sdi = g_malloc0(sizeof(struct sr_dev_inst));
+		sdi->status = SR_ST_INITIALIZING;
+		sdi->vendor = g_strdup(prof->vendor);
+		sdi->model = g_strdup(prof->model);
+		sdi->version = g_strdup(prof->model_version);
+		sdi->serial_num = g_strdup(serial_num);
+		sdi->connection_id = g_strdup(connection_id);
+
+		/* Fill in channellist according to this device's profile. */
+		num_logic_channels =
+			prof->dev_caps & DEV_CAPS_32BIT ? 32 :
+			(prof->dev_caps & DEV_CAPS_24BIT ? 24 :
+			 (prof->dev_caps & DEV_CAPS_16BIT ? 16 : 8));
+		num_analog_channels = prof->dev_caps & DEV_CAPS_AX_ANALOG ? 1 : 0;
+
+		/* Logic channels, all in one channel group. */
+		cg = g_malloc0(sizeof(struct sr_channel_group));
+		cg->name = g_strdup("Logic");
+		for (j = 0; j < num_logic_channels; j++) {
+			sprintf(channel_name, "D%d", j);
+			ch = sr_channel_new(sdi, j, SR_CHANNEL_LOGIC,
+						TRUE, channel_name);
+			cg->channels = g_slist_append(cg->channels, ch);
+		}
+		sdi->channel_groups = g_slist_append(NULL, cg);
+
+		for (j = 0; j < num_analog_channels; j++) {
+			snprintf(channel_name, 16, "A%d", j);
+			ch = sr_channel_new(sdi, j + num_logic_channels,
+					SR_CHANNEL_ANALOG, TRUE, channel_name);
+
+			/* Every analog channel gets its own channel group. */
+			cg = g_malloc0(sizeof(struct sr_channel_group));
+			cg->name = g_strdup(channel_name);
+			cg->channels = g_slist_append(NULL, ch);
+			sdi->channel_groups = g_slist_append(sdi->channel_groups, cg);
+		}
+
+		devc = fx3kit_dev_new();
+		devc->profile = prof;
+		sdi->priv = devc;
+		devices = g_slist_append(devices, sdi);
+
+		devc->samplerates = samplerates;
+		devc->num_samplerates = ARRAY_SIZE(samplerates);
+		if (!(prof->dev_caps & DEV_CAPS_FX3))
+			devc->num_samplerates -= NUM_FX3_RATES;
+		has_firmware = usb_match_manuf_prod(devlist[i],
+				"sigrok", "fx3lafw");
+
+		if (has_firmware) {
+			/* Already has the firmware, so fix the new address. */
+			sr_dbg("Found an fx3kit device.");
+			sdi->status = SR_ST_INACTIVE;
+			sdi->inst_type = SR_INST_USB;
+			sdi->conn = sr_usb_dev_inst_new(libusb_get_bus_number(devlist[i]),
+					libusb_get_device_address(devlist[i]), NULL);
+		} else {
+			if (ezusb_upload_firmware(drvc->sr_ctx, devlist[i],
+					USB_CONFIGURATION, prof->firmware,
+					(prof->dev_caps & DEV_CAPS_FX3)) == SR_OK)
+				/* Store when this device's FW was updated. */
+				devc->fw_updated = g_get_monotonic_time();
+			else
+				sr_err("Firmware upload failed for "
+				       "device %d.%d (logical).",
+				       libusb_get_bus_number(devlist[i]),
+				       libusb_get_device_address(devlist[i]));
+			sdi->inst_type = SR_INST_USB;
+			sdi->conn = sr_usb_dev_inst_new(libusb_get_bus_number(devlist[i]),
+					0xff, NULL);
+		}
+	}
+	libusb_free_device_list(devlist, 1);
+	g_slist_free_full(conn_devices, (GDestroyNotify)sr_usb_dev_inst_free);
+
+	return std_scan_complete(di, devices);
 }
+
 
 static int dev_open(struct sr_dev_inst *sdi)
 {
