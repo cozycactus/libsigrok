@@ -21,6 +21,161 @@
 #include "protocol.h"
 #include <math.h>
 
+#define FW_CHUNKSIZE (4 * 1024)
+
+static int fx3_reset(struct libusb_device_handle *hdl, int set_clear)
+{
+	int ret;
+	unsigned char buf[1];
+
+	sr_info("setting CPU reset mode %s...",
+		set_clear ? "on" : "off");
+	buf[0] = set_clear ? 1 : 0;
+	ret = libusb_control_transfer(hdl, LIBUSB_REQUEST_TYPE_VENDOR, 0xa0,
+				      0xe600, 0x0000, buf, 1, 100);
+	if (ret < 0)
+		sr_err("Unable to send control request: %s.",
+				libusb_error_name(ret));
+
+	return ret;
+}
+
+static int fx3_install_firmware(struct sr_context *ctx,
+				   libusb_device_handle *hdl,
+				   const char *name, gboolean fx3)
+{
+	unsigned char *firmware;
+	size_t length, offset, chunksize;
+	int ret, result;
+
+	/* Max size is 64 kiB since the value field of the setup packet,
+	 * which holds the firmware offset, is only 16 bit wide.
+	 */
+	firmware = sr_resource_load(ctx, SR_RESOURCE_FIRMWARE,
+			name, &length, (fx3? 536 << 10 : 1 << 16));
+	if (!firmware)
+		return SR_ERR;
+
+	sr_info("Uploading firmware '%s'.", name);
+
+	result = SR_OK;
+	offset = 0;
+	if (fx3) {
+		if (length < 4 ||
+		    firmware[0] != 'C' || firmware[1] != 'Y' ||
+		    firmware[3] != 0xb0) {
+			sr_err("Invalid signature on firmware");
+			g_free(firmware);
+			return SR_ERR;
+		}
+		offset = 4;
+	}
+	while (offset < length) {
+		size_t addr, sublength, suboffset;
+
+		if (fx3) {
+			if (offset + 4 == length) {
+				/* Skip checksum */
+				offset += 4;
+				break;
+			}
+			if (length < offset + 8) {
+				break;
+			}
+			sublength = RL32(firmware + offset) << 2;
+			offset += 4;
+			addr = RL32(firmware + offset);
+			offset += 4;
+			if (sublength > length - offset) {
+				break;
+			}
+		} else {
+			sublength = length - offset;
+			addr = 0;
+		}
+		suboffset = 0;
+
+		do {
+			chunksize = MIN(sublength - suboffset, FW_CHUNKSIZE);
+
+			ret = libusb_control_transfer(hdl, LIBUSB_REQUEST_TYPE_VENDOR |
+						      LIBUSB_ENDPOINT_OUT, 0xa0, (addr + suboffset) & 0xffff,
+						      (addr + suboffset) >> 16, firmware + offset + suboffset,
+						      chunksize, 100);
+			if (ret < 0) {
+				sr_err("Unable to send firmware to device: %s.",
+				       libusb_error_name(ret));
+				g_free(firmware);
+				return SR_ERR;
+			}
+			sr_info("Uploaded %zu bytes.", chunksize);
+			suboffset += chunksize;
+		} while (suboffset < sublength);
+
+		offset += sublength;
+	}
+	g_free(firmware);
+
+	if (offset < length) {
+		sr_err("Firmware file is truncated.");
+		return SR_ERR;
+	}
+
+	sr_info("Firmware upload done.");
+
+	return result;
+}
+
+
+static int fx3_upload_firmware(struct sr_context *ctx, libusb_device *dev,
+								int configuration,const char *name, gboolean fx3)
+{
+	struct libusb_device_handle *hdl;
+	int ret;
+
+	sr_info("uploading firmware to device on %d.%d",
+			libusb_get_bus_number(dev), libusb_get_device_address(dev));
+
+	if ((ret = libusb_open(dev, &hdl)) < 0) {
+			sr_err("failed to open device: %s.", libusb_error_name(ret));
+			return SR_ERR;
+	}
+	/*
+ * The libusb Darwin backend is broken: it can report a kernel driver being
+ * active, but detaching it always returns an error.
+ */
+#if !defined(__APPLE__)
+	if (libusb_kernel_driver_active(hdl, 0) == 1) {
+		if ((ret = libusb_detach_kernel_driver(hdl, 0)) < 0) {
+			sr_err("failed to detach kernel driver: %s",
+					libusb_error_name(ret));
+			return SR_ERR;
+		}
+	}
+#endif
+
+	if ((ret = libusb_set_configuration(hdl, configuration)) < 0) {
+		sr_err("Unable to set configuration: %s",
+				libusb_error_name(ret));
+		return SR_ERR;
+	}
+
+	if (!fx3 && (fx3_reset(hdl, 1)) < 0)
+		return SR_ERR;
+
+	if (fx3_install_firmware(ctx, hdl, name, fx3) < 0)
+		return SR_ERR;
+
+	if (!fx3 && (fx3_reset(hdl, 0)) < 0)
+		return SR_ERR;
+
+	libusb_close(hdl);
+
+	return SR_OK;
+
+}
+
+
 static const struct fx3kit_profile supported_fx3[] = {
 	/*
 	 * Cypress SuperSpeed Explorer Kit (CYUSB3KIT-003)
@@ -270,7 +425,7 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 			sdi->conn = sr_usb_dev_inst_new(libusb_get_bus_number(devlist[i]),
 					libusb_get_device_address(devlist[i]), NULL);
 		} else {
-			if (ezusb_upload_firmware(drvc->sr_ctx, devlist[i],
+			if (fx3_upload_firmware(drvc->sr_ctx, devlist[i],
 					USB_CONFIGURATION, prof->firmware,
 					(prof->dev_caps & DEV_CAPS_FX3)) == SR_OK)
 				/* Store when this device's FW was updated. */
@@ -291,100 +446,219 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 	return std_scan_complete(di, devices);
 }
 
+static void clear_helper(struct dev_context *devc)
+{
+	g_slist_free(devc->enabled_analog_channels);
+}
+
+static int dev_clear(const struct sr_dev_driver *di)
+{
+	return std_dev_clear_with_callback(di, (std_dev_clear_callback)clear_helper);
+}
+
 
 static int dev_open(struct sr_dev_inst *sdi)
 {
-	(void)sdi;
+	struct sr_dev_driver *di = sdi->driver;
+	struct sr_usb_dev_inst *usb;
+	struct dev_context *devc;
+	int ret;
+	int64_t timediff_us, timediff_ms;
 
-	/* TODO: get handle from sdi->conn and open it. */
+	devc = sdi->priv;
+	usb = sdi->conn;
+
+	/*
+	 * If the firmware was recently uploaded, wait up to MAX_RENUM_DELAY_MS
+	 * milliseconds for the FX2 to renumerate.
+	 */
+	ret = SR_ERR;
+	if (devc->fw_updated > 0) {
+		sr_info("Waiting for device to reset.");
+		/* Takes >= 300ms for the FX2 to be gone from the USB bus. */
+		g_usleep(300 * 1000);
+		timediff_ms = 0;
+		while (timediff_ms < MAX_RENUM_DELAY_MS) {
+			if ((ret = fx3kit_dev_open(sdi, di)) == SR_OK)
+				break;
+			g_usleep(100 * 1000);
+
+			timediff_us = g_get_monotonic_time() - devc->fw_updated;
+			timediff_ms = timediff_us / 1000;
+			sr_spew("Waited %" PRIi64 "ms.", timediff_ms);
+		}
+		if (ret != SR_OK) {
+			sr_err("Device failed to renumerate.");
+			return SR_ERR;
+		}
+		sr_info("Device came back after %" PRIi64 "ms.", timediff_ms);
+	} else {
+		sr_info("Firmware upload was not needed.");
+		ret = fx3kit_dev_open(sdi, di);
+	}
+
+	if (ret != SR_OK) {
+		sr_err("Unable to open device.");
+		return SR_ERR;
+	}
+
+	ret = libusb_claim_interface(usb->devhdl, USB_INTERFACE);
+	if (ret != 0) {
+		switch (ret) {
+		case LIBUSB_ERROR_BUSY:
+			sr_err("Unable to claim USB interface. Another "
+			       "program or driver has already claimed it.");
+			break;
+		case LIBUSB_ERROR_NO_DEVICE:
+			sr_err("Device has been disconnected.");
+			break;
+		default:
+			sr_err("Unable to claim interface: %s.",
+			       libusb_error_name(ret));
+			break;
+		}
+
+		return SR_ERR;
+	}
+
+	if (devc->cur_samplerate == 0) {
+		/* Samplerate hasn't been set; default to the slowest one. */
+		devc->cur_samplerate = devc->samplerates[0];
+	}
 
 	return SR_OK;
 }
+
 
 static int dev_close(struct sr_dev_inst *sdi)
 {
-	(void)sdi;
+	struct sr_usb_dev_inst *usb;
 
-	/* TODO: get handle from sdi->conn and close it. */
+	usb = sdi->conn;
+
+	if (!usb->devhdl)
+		return SR_ERR_BUG;
+
+	sr_info("Closing device on %d.%d (logical) / %s (physical) interface %d.",
+		usb->bus, usb->address, sdi->connection_id, USB_INTERFACE);
+	libusb_release_interface(usb->devhdl, USB_INTERFACE);
+	libusb_close(usb->devhdl);
+	usb->devhdl = NULL;
 
 	return SR_OK;
 }
+
 
 static int config_get(uint32_t key, GVariant **data,
 	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg)
 {
-	int ret;
+	struct dev_context *devc;
+	struct sr_usb_dev_inst *usb;
 
-	(void)sdi;
-	(void)data;
 	(void)cg;
 
-	ret = SR_OK;
+	if (!sdi)
+		return SR_ERR_ARG;
+
+	devc = sdi->priv;
+
 	switch (key) {
-	/* TODO */
+	case SR_CONF_CONN:
+		if (!sdi->conn)
+			return SR_ERR_ARG;
+		usb = sdi->conn;
+		if (usb->address == 255)
+			/* Device still needs to re-enumerate after firmware
+			 * upload, so we don't know its (future) address. */
+			return SR_ERR;
+		*data = g_variant_new_printf("%d.%d", usb->bus, usb->address);
+		break;
+	case SR_CONF_LIMIT_SAMPLES:
+		*data = g_variant_new_uint64(devc->limit_samples);
+		break;
+	case SR_CONF_SAMPLERATE:
+		*data = g_variant_new_uint64(devc->cur_samplerate);
+		break;
+	case SR_CONF_CAPTURE_RATIO:
+		*data = g_variant_new_uint64(devc->capture_ratio);
+		break;
 	default:
 		return SR_ERR_NA;
 	}
 
-	return ret;
+	return SR_OK;
 }
+
 
 static int config_set(uint32_t key, GVariant *data,
 	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg)
 {
-	int ret;
+	struct dev_context *devc;
+	int idx;
 
-	(void)sdi;
-	(void)data;
 	(void)cg;
 
-	ret = SR_OK;
+	if (!sdi)
+		return SR_ERR_ARG;
+
+	devc = sdi->priv;
+
 	switch (key) {
-	/* TODO */
-	default:
-		ret = SR_ERR_NA;
-	}
-
-	return ret;
-}
-
-static int config_list(uint32_t key, GVariant **data,
-	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg)
-{
-	int ret;
-
-	(void)sdi;
-	(void)data;
-	(void)cg;
-
-	ret = SR_OK;
-	switch (key) {
-	/* TODO */
+	case SR_CONF_SAMPLERATE:
+		if ((idx = std_u64_idx(data, devc->samplerates, devc->num_samplerates)) < 0)
+			return SR_ERR_ARG;
+		devc->cur_samplerate = devc->samplerates[idx];
+		break;
+	case SR_CONF_LIMIT_SAMPLES:
+		devc->limit_samples = g_variant_get_uint64(data);
+		break;
+	case SR_CONF_CAPTURE_RATIO:
+		devc->capture_ratio = g_variant_get_uint64(data);
+		break;
 	default:
 		return SR_ERR_NA;
 	}
 
-	return ret;
+	return SR_OK;
 }
 
-static int dev_acquisition_start(const struct sr_dev_inst *sdi)
-{
-	/* TODO: configure hardware, reset acquisition state, set up
-	 * callbacks and send header packet. */
 
-	(void)sdi;
+static int config_list(uint32_t key, GVariant **data,
+	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg)
+{
+	struct dev_context *devc;
+
+	devc = (sdi) ? sdi->priv : NULL;
+
+	switch (key) {
+	case SR_CONF_SCAN_OPTIONS:
+	case SR_CONF_DEVICE_OPTIONS:
+		return STD_CONFIG_LIST(key, data, sdi, cg, scanopts, drvopts, devopts);
+	case SR_CONF_SAMPLERATE:
+		if (!devc)
+			return SR_ERR_NA;
+		*data = std_gvar_samplerates(devc->samplerates, devc->num_samplerates);
+		break;
+	case SR_CONF_TRIGGER_MATCH:
+		*data = std_gvar_array_i32(ARRAY_AND_SIZE(trigger_matches));
+		break;
+	default:
+		return SR_ERR_NA;
+	}
 
 	return SR_OK;
 }
+
+
+
 
 static int dev_acquisition_stop(struct sr_dev_inst *sdi)
 {
-	/* TODO: stop acquisition. */
-
-	(void)sdi;
+	fx3kit_abort_acquisition(sdi->priv);
 
 	return SR_OK;
 }
+
 
 static struct sr_dev_driver fx3kit_driver_info = {
 	.name = "fx3kit",
@@ -394,13 +668,13 @@ static struct sr_dev_driver fx3kit_driver_info = {
 	.cleanup = std_cleanup,
 	.scan = scan,
 	.dev_list = std_dev_list,
-	.dev_clear = std_dev_clear,
+	.dev_clear = dev_clear,
 	.config_get = config_get,
 	.config_set = config_set,
 	.config_list = config_list,
 	.dev_open = dev_open,
 	.dev_close = dev_close,
-	.dev_acquisition_start = dev_acquisition_start,
+	.dev_acquisition_start = fx3kit_start_acquisition,
 	.dev_acquisition_stop = dev_acquisition_stop,
 	.context = NULL,
 };
