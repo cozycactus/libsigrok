@@ -24,7 +24,7 @@
 #include "protocol.h"
 #include <math.h>
 
-<<<<<<< HEAD
+
 #define FW_CHUNKSIZE (4 * 1024)
 
 static int fx3_reset(struct libusb_device_handle *hdl, int set_clear)
@@ -180,8 +180,7 @@ static int fx3_upload_firmware(struct sr_context *ctx, libusb_device *dev,
 }
 
 
-=======
->>>>>>> fx3kit : test commit
+
 static const struct fx3kit_profile supported_fx3[] = {
 	/*
 	 * Cypress SuperSpeed Explorer Kit (CYUSB3KIT-003)
@@ -463,7 +462,7 @@ static int dev_clear(const struct sr_dev_driver *di)
 	return std_dev_clear_with_callback(di, (std_dev_clear_callback)clear_helper);
 }
 
-=======
+
 
 	drvc = di->context;
 
@@ -620,7 +619,7 @@ static int dev_clear(const struct sr_dev_driver *di)
 			sdi->conn = sr_usb_dev_inst_new(libusb_get_bus_number(devlist[i]),
 					libusb_get_device_address(devlist[i]), NULL);
 		} else {
-			if (ezusb_upload_firmware(drvc->sr_ctx, devlist[i],
+			if (fx3_upload_firmware(drvc->sr_ctx, devlist[i],
 					USB_CONFIGURATION, prof->firmware,
 					(prof->dev_caps & DEV_CAPS_FX3)) == SR_OK)
 				/* Store when this device's FW was updated. */
@@ -641,7 +640,18 @@ static int dev_clear(const struct sr_dev_driver *di)
 	return std_scan_complete(di, devices);
 }
 
->>>>>>> fx3kit : test commit
+
+static void clear_helper(struct dev_context *devc)
+{
+	g_slist_free(devc->enabled_analog_channels);
+}
+
+static int dev_clear(const struct sr_dev_driver *di)
+{
+	return std_dev_clear_with_callback(di, (std_dev_clear_callback)clear_helper);
+}
+
+
 
 static int dev_open(struct sr_dev_inst *sdi)
 {
@@ -653,6 +663,7 @@ static int dev_open(struct sr_dev_inst *sdi)
 
 	devc = sdi->priv;
 	usb = sdi->conn;
+
 
 	/*
 	 * If the firmware was recently uploaded, wait up to MAX_RENUM_DELAY_MS
@@ -704,6 +715,59 @@ static int dev_open(struct sr_dev_inst *sdi)
 			break;
 		}
 
+
+
+	/*
+	 * If the firmware was recently uploaded, wait up to MAX_RENUM_DELAY_MS
+	 * milliseconds for the FX2 to renumerate.
+	 */
+	ret = SR_ERR;
+	if (devc->fw_updated > 0) {
+		sr_info("Waiting for device to reset.");
+		/* Takes >= 300ms for the FX2 to be gone from the USB bus. */
+		g_usleep(300 * 1000);
+		timediff_ms = 0;
+		while (timediff_ms < MAX_RENUM_DELAY_MS) {
+			if ((ret = fx3kit_dev_open(sdi, di)) == SR_OK)
+				break;
+			g_usleep(100 * 1000);
+
+			timediff_us = g_get_monotonic_time() - devc->fw_updated;
+			timediff_ms = timediff_us / 1000;
+			sr_spew("Waited %" PRIi64 "ms.", timediff_ms);
+		}
+		if (ret != SR_OK) {
+			sr_err("Device failed to renumerate.");
+			return SR_ERR;
+		}
+		sr_info("Device came back after %" PRIi64 "ms.", timediff_ms);
+	} else {
+		sr_info("Firmware upload was not needed.");
+		ret = fx3kit_dev_open(sdi, di);
+	}
+
+	if (ret != SR_OK) {
+		sr_err("Unable to open device.");
+		return SR_ERR;
+	}
+
+	ret = libusb_claim_interface(usb->devhdl, USB_INTERFACE);
+	if (ret != 0) {
+		switch (ret) {
+		case LIBUSB_ERROR_BUSY:
+			sr_err("Unable to claim USB interface. Another "
+			       "program or driver has already claimed it.");
+			break;
+		case LIBUSB_ERROR_NO_DEVICE:
+			sr_err("Device has been disconnected.");
+			break;
+		default:
+			sr_err("Unable to claim interface: %s.",
+			       libusb_error_name(ret));
+			break;
+		}
+
+
 		return SR_ERR;
 	}
 
@@ -722,8 +786,15 @@ static int dev_close(struct sr_dev_inst *sdi)
 
 	usb = sdi->conn;
 
+
 	if (!usb->devhdl)
 		return SR_ERR_BUG;
+
+
+
+	if (!usb->devhdl)
+		return SR_ERR_BUG;
+
 
 	sr_info("Closing device on %d.%d (logical) / %s (physical) interface %d.",
 		usb->bus, usb->address, sdi->connection_id, USB_INTERFACE);
