@@ -53,7 +53,6 @@ struct datafeed_callback {
 
 /** Custom GLib event source for generic descriptor I/O.
  * @see https://developer.gnome.org/glib/stable/glib-The-Main-Event-Loop.html
- * @internal
  */
 struct fd_source {
 	GSource base;
@@ -127,7 +126,7 @@ static gboolean fd_source_dispatch(GSource *source,
 		sr_err("Callback not set, cannot dispatch event.");
 		return G_SOURCE_REMOVE;
 	}
-	keep = (*(sr_receive_data_callback)callback)
+	keep = (*SR_RECEIVE_DATA_CALLBACK(callback))
 			(fsource->pollfd.fd, revents, user_data);
 
 	if (fsource->timeout_us >= 0 && G_LIKELY(keep)
@@ -158,7 +157,9 @@ static void fd_source_finalize(GSource *source)
  * @param session The session the event source belongs to.
  * @param key The key used to identify this source.
  * @param fd The file descriptor or HANDLE.
+ * @param events Events.
  * @param timeout_ms The timeout interval in ms, or -1 to wait indefinitely.
+ *
  * @return A new event source object, or NULL on failure.
  */
 static GSource *fd_source_new(struct sr_session *session, void *key,
@@ -1236,7 +1237,7 @@ SR_PRIV int sr_session_fd_source_add(struct sr_session *session,
 	if (!source)
 		return SR_ERR;
 
-	g_source_set_callback(source, (GSourceFunc)cb, cb_data, NULL);
+	g_source_set_callback(source, G_SOURCE_FUNC(cb), cb_data, NULL);
 
 	ret = sr_session_source_add_internal(session, key, source);
 	g_source_unref(source);

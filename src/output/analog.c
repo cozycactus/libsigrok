@@ -118,6 +118,9 @@ static int receive(const struct sr_output *o, const struct sr_datafeed_packet *p
 				g_string_append_printf(*out, "%"
 					G_GUINT64_FORMAT,
 					g_variant_get_uint64(src->data));
+			} else if (srci->datatype == SR_T_STRING) {
+				g_string_append_printf(*out, "%s",
+					g_variant_get_string(src->data, NULL));
 			}
 			g_string_append(*out, "\n");
 		}
@@ -192,8 +195,14 @@ static int cleanup(struct sr_output *o)
 	ctx = o->priv;
 
 	g_ptr_array_free(ctx->channellist, 1);
-	g_variant_unref(options[0].def);
-	g_slist_free_full(options[0].values, (GDestroyNotify)g_variant_unref);
+	if (options[0].def) {
+		g_variant_unref(options[0].def);
+		options[0].def = NULL;
+	}
+	if (options[0].values) {
+		g_slist_free_full(options[0].values, (GDestroyNotify)g_variant_unref);
+		options[0].values = NULL;
+	}
 	g_free(ctx->fdata);
 	g_free(ctx);
 	o->priv = NULL;

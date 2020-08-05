@@ -626,7 +626,6 @@ SR_PRIV int lecroy_xstream_receive_data(int fd, int revents, void *cb_data)
 	struct sr_analog_encoding encoding;
 	struct sr_analog_meaning meaning;
 	struct sr_analog_spec spec;
-	char buf[8];
 
 	(void)fd;
 	(void)revents;
@@ -644,12 +643,6 @@ SR_PRIV int lecroy_xstream_receive_data(int fd, int revents, void *cb_data)
 
 	if (ch->type != SR_CHANNEL_ANALOG)
 		return SR_ERR;
-
-	/* Pass on the received data of the channel(s). */
-	if (sr_scpi_read_data(sdi->conn, buf, 4) != 4) {
-		sr_err("Reading header failed, scope probably didn't send any data.");
-		return TRUE;
-	}
 
 	if (sr_scpi_get_block(sdi->conn, NULL, &data) != SR_OK) {
 		if (data)
@@ -686,10 +679,8 @@ SR_PRIV int lecroy_xstream_receive_data(int fd, int revents, void *cb_data)
 	 * Send "frame begin" packet upon reception of data for the
 	 * first enabled channel.
 	 */
-	if (devc->current_channel == devc->enabled_channels) {
-		packet.type = SR_DF_FRAME_BEGIN;
-		sr_session_send(sdi, &packet);
-	}
+	if (devc->current_channel == devc->enabled_channels)
+		std_session_send_df_frame_begin(sdi);
 
 	meaning.channels = g_slist_append(NULL, ch);
 	packet.payload = &analog;
@@ -713,8 +704,7 @@ SR_PRIV int lecroy_xstream_receive_data(int fd, int revents, void *cb_data)
 		return TRUE;
 	}
 
-	packet.type = SR_DF_FRAME_END;
-	sr_session_send(sdi, &packet);
+	std_session_send_df_frame_end(sdi);
 
 	/*
 	 * End of frame was reached. Stop acquisition after the specified

@@ -51,7 +51,7 @@ SR_PRIV int gpd_receive_reply(struct sr_serial_dev_inst *serial, char *buf,
 {
 	int l_recv = 0, bufpos = 0, retc, l_startpos = 0, lines = 1;
 	gint64 start, remaining;
-	const int timeout_ms = 100;
+	const int timeout_ms = 250;
 
 	if (!serial || !buf || (buflen <= 0))
 		return SR_ERR_ARG;
@@ -69,7 +69,7 @@ SR_PRIV int gpd_receive_reply(struct sr_serial_dev_inst *serial, char *buf,
 		if (bufpos == 0 && buf[bufpos] == '\n')
 			continue;
 
-		if (buf[bufpos] == '\n') {
+		if (buf[bufpos] == '\n' || buf[bufpos] == '\r') {
 			buf[bufpos] = '\0';
 			sr_dbg("Received line '%s'.", &buf[l_startpos]);
 			buf[bufpos] = '\n';
@@ -175,6 +175,7 @@ SR_PRIV int gpd_receive_data(int fd, int revents, void *cb_data)
 			}
 
 			devc->reply_pending = FALSE;
+			sr_sw_limits_update_samples_read(&devc->limits, 1);
 		}
 	} else {
 		if (!devc->reply_pending) {

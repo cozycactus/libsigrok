@@ -4,6 +4,7 @@
  * Copyright (C) 2010-2012 Håvard Espeland <gus@ping.uio.no>,
  * Copyright (C) 2010 Martin Stensgård <mastensg@ping.uio.no>
  * Copyright (C) 2010 Carl Henrik Lunde <chlunde@ping.uio.no>
+ * Copyright (C) 2020 Gerhard Sittig <gerhard.sittig@gmx.net>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,13 +24,17 @@
 #include "protocol.h"
 
 /*
- * Channel numbers seem to go from 1-16, according to this image:
- * http://tools.asix.net/img/sigma_sigmacab_pins_720.jpg
- * (the cable has two additional GND pins, and a TI and TO pin)
+ * Channels are labelled 1-16, see this vendor's image of the cable:
+ * http://tools.asix.net/img/sigma_sigmacab_pins_720.jpg (TI/TO are
+ * additional trigger in/out signals).
  */
 static const char *channel_names[] = {
 	"1", "2", "3", "4", "5", "6", "7", "8",
 	"9", "10", "11", "12", "13", "14", "15", "16",
+};
+
+static const uint32_t scanopts[] = {
+	SR_CONF_CONN,
 };
 
 static const uint32_t drvopts[] = {
@@ -39,112 +44,232 @@ static const uint32_t drvopts[] = {
 static const uint32_t devopts[] = {
 	SR_CONF_LIMIT_MSEC | SR_CONF_GET | SR_CONF_SET,
 	SR_CONF_LIMIT_SAMPLES | SR_CONF_GET | SR_CONF_SET,
+	SR_CONF_CONN | SR_CONF_GET,
 	SR_CONF_SAMPLERATE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
-#if ASIX_SIGMA_WITH_TRIGGER
+	SR_CONF_EXTERNAL_CLOCK | SR_CONF_GET | SR_CONF_SET,
+	SR_CONF_EXTERNAL_CLOCK_SOURCE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
+	SR_CONF_CLOCK_EDGE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
 	SR_CONF_TRIGGER_MATCH | SR_CONF_LIST,
 	SR_CONF_CAPTURE_RATIO | SR_CONF_GET | SR_CONF_SET,
-#endif
+	/* Consider SR_CONF_TRIGGER_PATTERN (SR_T_STRING, GET/SET) support. */
 };
 
-#if ASIX_SIGMA_WITH_TRIGGER
+static const char *ext_clock_edges[] = {
+	[SIGMA_CLOCK_EDGE_RISING] = "rising",
+	[SIGMA_CLOCK_EDGE_FALLING] = "falling",
+	[SIGMA_CLOCK_EDGE_EITHER] = "either",
+};
+
 static const int32_t trigger_matches[] = {
 	SR_TRIGGER_ZERO,
 	SR_TRIGGER_ONE,
 	SR_TRIGGER_RISING,
 	SR_TRIGGER_FALLING,
 };
-#endif
 
 static void clear_helper(struct dev_context *devc)
 {
-	ftdi_deinit(&devc->ftdic);
+	(void)sigma_force_close(devc);
 }
 
 static int dev_clear(const struct sr_dev_driver *di)
 {
-	return std_dev_clear_with_callback(di, (std_dev_clear_callback)clear_helper);
+	return std_dev_clear_with_callback(di,
+		(std_dev_clear_callback)clear_helper);
+}
+
+static gboolean bus_addr_in_devices(int bus, int addr, GSList *devs)
+{
+	struct sr_usb_dev_inst *usb;
+
+	for (/* EMPTY */; devs; devs = devs->next) {
+		usb = devs->data;
+		if (usb->bus == bus && usb->address == addr)
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+static gboolean known_vid_pid(const struct libusb_device_descriptor *des)
+{
+	gboolean is_sigma, is_omega;
+
+	if (des->idVendor != USB_VENDOR_ASIX)
+		return FALSE;
+	is_sigma = des->idProduct == USB_PRODUCT_SIGMA;
+	is_omega = des->idProduct == USB_PRODUCT_OMEGA;
+	if (!is_sigma && !is_omega)
+		return FALSE;
+	return TRUE;
 }
 
 static GSList *scan(struct sr_dev_driver *di, GSList *options)
 {
+	struct drv_context *drvc;
+	libusb_context *usbctx;
+	const char *conn;
+	GSList *l, *conn_devices;
+	struct sr_config *src;
+	GSList *devices;
+	libusb_device **devlist, *devitem;
+	int bus, addr;
+	struct libusb_device_descriptor des;
+	struct libusb_device_handle *hdl;
+	int ret;
+	char conn_id[20];
+	char serno_txt[16];
+	char *end;
+	long serno_num, serno_pre;
+	enum asix_device_type dev_type;
+	const char *dev_text;
 	struct sr_dev_inst *sdi;
 	struct dev_context *devc;
-	struct ftdi_device_list *devlist;
-	char serial_txt[10];
-	uint32_t serial;
-	int ret;
-	unsigned int i;
+	size_t devidx, chidx;
 
-	(void)options;
+	drvc = di->context;
+	usbctx = drvc->sr_ctx->libusb_ctx;
 
-	devc = g_malloc0(sizeof(struct dev_context));
-
-	ftdi_init(&devc->ftdic);
-
-	if ((ret = ftdi_usb_find_all(&devc->ftdic, &devlist,
-	    USB_VENDOR, USB_PRODUCT)) <= 0) {
-		if (ret < 0)
-			sr_err("ftdi_usb_find_all(): %d", ret);
-		goto free;
+	/* Find all devices which match an (optional) conn= spec. */
+	conn = NULL;
+	for (l = options; l; l = l->next) {
+		src = l->data;
+		switch (src->key) {
+		case SR_CONF_CONN:
+			conn = g_variant_get_string(src->data, NULL);
+			break;
+		}
 	}
+	conn_devices = NULL;
+	if (conn)
+		conn_devices = sr_usb_find(usbctx, conn);
+	if (conn && !conn_devices)
+		return NULL;
 
-	/* Make sure it's a version 1 or 2 SIGMA. */
-	ftdi_usb_get_strings(&devc->ftdic, devlist->dev, NULL, 0, NULL, 0,
-			     serial_txt, sizeof(serial_txt));
-	sscanf(serial_txt, "%x", &serial);
+	/* Find all ASIX logic analyzers (which match the connection spec). */
+	devices = NULL;
+	libusb_get_device_list(usbctx, &devlist);
+	for (devidx = 0; devlist[devidx]; devidx++) {
+		devitem = devlist[devidx];
 
-	if (serial < 0xa6010000 || serial > 0xa602ffff) {
-		sr_err("Only SIGMA and SIGMA2 are supported "
-		       "in this version of libsigrok.");
-		goto free;
+		/* Check for connection match if a user spec was given. */
+		bus = libusb_get_bus_number(devitem);
+		addr = libusb_get_device_address(devitem);
+		if (conn && !bus_addr_in_devices(bus, addr, conn_devices))
+			continue;
+		snprintf(conn_id, sizeof(conn_id), "%d.%d", bus, addr);
+
+		/*
+		 * Check for known VID:PID pairs. Get the serial number,
+		 * to then derive the device type from it.
+		 */
+		libusb_get_device_descriptor(devitem, &des);
+		if (!known_vid_pid(&des))
+			continue;
+		if (!des.iSerialNumber) {
+			sr_warn("Cannot get serial number (index 0).");
+			continue;
+		}
+		ret = libusb_open(devitem, &hdl);
+		if (ret < 0) {
+			sr_warn("Cannot open USB device %04x.%04x: %s.",
+				des.idVendor, des.idProduct,
+				libusb_error_name(ret));
+			continue;
+		}
+		ret = libusb_get_string_descriptor_ascii(hdl,
+			des.iSerialNumber,
+			(unsigned char *)serno_txt, sizeof(serno_txt));
+		if (ret < 0) {
+			sr_warn("Cannot get serial number (%s).",
+				libusb_error_name(ret));
+			libusb_close(hdl);
+			continue;
+		}
+		libusb_close(hdl);
+
+		/*
+		 * All ASIX logic analyzers have a serial number, which
+		 * reads as a hex number, and tells the device type.
+		 */
+		ret = sr_atol_base(serno_txt, &serno_num, &end, 16);
+		if (ret != SR_OK || !end || *end) {
+			sr_warn("Cannot interpret serial number %s.", serno_txt);
+			continue;
+		}
+		dev_type = ASIX_TYPE_NONE;
+		dev_text = NULL;
+		serno_pre = serno_num >> 16;
+		switch (serno_pre) {
+		case 0xa601:
+			dev_type = ASIX_TYPE_SIGMA;
+			dev_text = "SIGMA";
+			sr_info("Found SIGMA, serno %s.", serno_txt);
+			break;
+		case 0xa602:
+			dev_type = ASIX_TYPE_SIGMA;
+			dev_text = "SIGMA2";
+			sr_info("Found SIGMA2, serno %s.", serno_txt);
+			break;
+		case 0xa603:
+			dev_type = ASIX_TYPE_OMEGA;
+			dev_text = "OMEGA";
+			sr_info("Found OMEGA, serno %s.", serno_txt);
+			if (!ASIX_WITH_OMEGA) {
+				sr_warn("OMEGA support is not implemented yet.");
+				continue;
+			}
+			break;
+		default:
+			sr_warn("Unknown serno %s, skipping.", serno_txt);
+			continue;
+		}
+
+		/* Create a device instance, add it to the result set. */
+
+		sdi = g_malloc0(sizeof(*sdi));
+		devices = g_slist_append(devices, sdi);
+		sdi->status = SR_ST_INITIALIZING;
+		sdi->vendor = g_strdup("ASIX");
+		sdi->model = g_strdup(dev_text);
+		sdi->serial_num = g_strdup(serno_txt);
+		sdi->connection_id = g_strdup(conn_id);
+		for (chidx = 0; chidx < ARRAY_SIZE(channel_names); chidx++)
+			sr_channel_new(sdi, chidx, SR_CHANNEL_LOGIC,
+				TRUE, channel_names[chidx]);
+
+		devc = g_malloc0(sizeof(*devc));
+		sdi->priv = devc;
+		devc->id.vid = des.idVendor;
+		devc->id.pid = des.idProduct;
+		devc->id.serno = serno_num;
+		devc->id.prefix = serno_pre;
+		devc->id.type = dev_type;
+		sr_sw_limits_init(&devc->limit.config);
+		devc->capture_ratio = 50;
+		devc->use_triggers = FALSE;
+
+		/* Get current hardware configuration (or use defaults). */
+		(void)sigma_fetch_hw_config(sdi);
 	}
+	libusb_free_device_list(devlist, 1);
+	g_slist_free_full(conn_devices, (GDestroyNotify)sr_usb_dev_inst_free);
 
-	sr_info("Found ASIX SIGMA - Serial: %s", serial_txt);
-
-	devc->cur_samplerate = samplerates[0];
-	devc->limit_msec = 0;
-	devc->limit_samples = 0;
-	devc->cur_firmware = -1;
-	devc->num_channels = 0;
-	devc->samples_per_event = 0;
-	devc->capture_ratio = 50;
-	devc->use_triggers = 0;
-
-	sdi = g_malloc0(sizeof(struct sr_dev_inst));
-	sdi->status = SR_ST_INITIALIZING;
-	sdi->vendor = g_strdup("ASIX");
-	sdi->model = g_strdup("SIGMA");
-
-	for (i = 0; i < ARRAY_SIZE(channel_names); i++)
-		sr_channel_new(sdi, i, SR_CHANNEL_LOGIC, TRUE, channel_names[i]);
-
-	sdi->priv = devc;
-
-	ftdi_list_free(&devlist);
-
-	return std_scan_complete(di, g_slist_append(NULL, sdi));
-
-free:
-	ftdi_deinit(&devc->ftdic);
-	g_free(devc);
-	return NULL;
+	return std_scan_complete(di, devices);
 }
 
 static int dev_open(struct sr_dev_inst *sdi)
 {
 	struct dev_context *devc;
-	int ret;
 
 	devc = sdi->priv;
 
-	if ((ret = ftdi_usb_open_desc(&devc->ftdic,
-			USB_VENDOR, USB_PRODUCT, USB_DESCRIPTION, NULL)) < 0) {
-		sr_err("Failed to open device (%d): %s.",
-		       ret, ftdi_get_error_string(&devc->ftdic));
-		return SR_ERR;
+	if (devc->id.type == ASIX_TYPE_OMEGA && !ASIX_WITH_OMEGA) {
+		sr_err("OMEGA support is not implemented yet.");
+		return SR_ERR_NA;
 	}
 
-	return SR_OK;
+	return sigma_force_open(sdi);
 }
 
 static int dev_close(struct sr_dev_inst *sdi)
@@ -153,13 +278,14 @@ static int dev_close(struct sr_dev_inst *sdi)
 
 	devc = sdi->priv;
 
-	return (ftdi_usb_close(&devc->ftdic) == 0) ? SR_OK : SR_ERR;
+	return sigma_force_close(devc);
 }
 
 static int config_get(uint32_t key, GVariant **data,
 	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg)
 {
 	struct dev_context *devc;
+	const char *clock_text;
 
 	(void)cg;
 
@@ -168,20 +294,29 @@ static int config_get(uint32_t key, GVariant **data,
 	devc = sdi->priv;
 
 	switch (key) {
+	case SR_CONF_CONN:
+		*data = g_variant_new_string(sdi->connection_id);
+		break;
 	case SR_CONF_SAMPLERATE:
-		*data = g_variant_new_uint64(devc->cur_samplerate);
+		*data = g_variant_new_uint64(devc->clock.samplerate);
+		break;
+	case SR_CONF_EXTERNAL_CLOCK:
+		*data = g_variant_new_boolean(devc->clock.use_ext_clock);
+		break;
+	case SR_CONF_EXTERNAL_CLOCK_SOURCE:
+		clock_text = channel_names[devc->clock.clock_pin];
+		*data = g_variant_new_string(clock_text);
+		break;
+	case SR_CONF_CLOCK_EDGE:
+		clock_text = ext_clock_edges[devc->clock.clock_edge];
+		*data = g_variant_new_string(clock_text);
 		break;
 	case SR_CONF_LIMIT_MSEC:
-		*data = g_variant_new_uint64(devc->limit_msec);
-		break;
 	case SR_CONF_LIMIT_SAMPLES:
-		*data = g_variant_new_uint64(devc->limit_samples);
-		break;
-#if ASIX_SIGMA_WITH_TRIGGER
+		return sr_sw_limits_config_get(&devc->limit.config, key, data);
 	case SR_CONF_CAPTURE_RATIO:
 		*data = g_variant_new_uint64(devc->capture_ratio);
 		break;
-#endif
 	default:
 		return SR_ERR_NA;
 	}
@@ -193,6 +328,9 @@ static int config_set(uint32_t key, GVariant *data,
 	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg)
 {
 	struct dev_context *devc;
+	int ret;
+	uint64_t want_rate, have_rate;
+	int idx;
 
 	(void)cg;
 
@@ -200,20 +338,42 @@ static int config_set(uint32_t key, GVariant *data,
 
 	switch (key) {
 	case SR_CONF_SAMPLERATE:
-		return sigma_set_samplerate(sdi, g_variant_get_uint64(data));
+		want_rate = g_variant_get_uint64(data);
+		ret = sigma_normalize_samplerate(want_rate, &have_rate);
+		if (ret != SR_OK)
+			return ret;
+		if (have_rate != want_rate) {
+			char *text_want, *text_have;
+			text_want = sr_samplerate_string(want_rate);
+			text_have = sr_samplerate_string(have_rate);
+			sr_info("Adjusted samplerate %s to %s.",
+				text_want, text_have);
+			g_free(text_want);
+			g_free(text_have);
+		}
+		devc->clock.samplerate = have_rate;
+		break;
+	case SR_CONF_EXTERNAL_CLOCK:
+		devc->clock.use_ext_clock = g_variant_get_boolean(data);
+		break;
+	case SR_CONF_EXTERNAL_CLOCK_SOURCE:
+		idx = std_str_idx(data, ARRAY_AND_SIZE(channel_names));
+		if (idx < 0)
+			return SR_ERR_ARG;
+		devc->clock.clock_pin = idx;
+		break;
+	case SR_CONF_CLOCK_EDGE:
+		idx = std_str_idx(data, ARRAY_AND_SIZE(ext_clock_edges));
+		if (idx < 0)
+			return SR_ERR_ARG;
+		devc->clock.clock_edge = idx;
+		break;
 	case SR_CONF_LIMIT_MSEC:
-		devc->limit_msec = g_variant_get_uint64(data);
-		break;
 	case SR_CONF_LIMIT_SAMPLES:
-		devc->limit_samples = g_variant_get_uint64(data);
-		devc->limit_msec = sigma_limit_samples_to_msec(devc,
-						devc->limit_samples);
-		break;
-#if ASIX_SIGMA_WITH_TRIGGER
+		return sr_sw_limits_config_set(&devc->limit.config, key, data);
 	case SR_CONF_CAPTURE_RATIO:
 		devc->capture_ratio = g_variant_get_uint64(data);
 		break;
-#endif
 	default:
 		return SR_ERR_NA;
 	}
@@ -225,16 +385,24 @@ static int config_list(uint32_t key, GVariant **data,
 	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg)
 {
 	switch (key) {
+	case SR_CONF_SCAN_OPTIONS:
 	case SR_CONF_DEVICE_OPTIONS:
-		return STD_CONFIG_LIST(key, data, sdi, cg, NO_OPTS, drvopts, devopts);
+		if (cg)
+			return SR_ERR_NA;
+		return STD_CONFIG_LIST(key, data, sdi, cg,
+			scanopts, drvopts, devopts);
 	case SR_CONF_SAMPLERATE:
-		*data = std_gvar_samplerates(samplerates, samplerates_count);
+		*data = sigma_get_samplerates_list();
 		break;
-#if ASIX_SIGMA_WITH_TRIGGER
+	case SR_CONF_EXTERNAL_CLOCK_SOURCE:
+		*data = g_variant_new_strv(ARRAY_AND_SIZE(channel_names));
+		break;
+	case SR_CONF_CLOCK_EDGE:
+		*data = g_variant_new_strv(ARRAY_AND_SIZE(ext_clock_edges));
+		break;
 	case SR_CONF_TRIGGER_MATCH:
 		*data = std_gvar_array_i32(ARRAY_AND_SIZE(trigger_matches));
 		break;
-#endif
 	default:
 		return SR_ERR_NA;
 	}
@@ -245,115 +413,194 @@ static int config_list(uint32_t key, GVariant **data,
 static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 {
 	struct dev_context *devc;
-	struct clockselect_50 clockselect;
-	int triggerpin, ret;
-	uint8_t triggerselect;
+	uint16_t pindis_mask;
+	uint8_t async, div;
+	int ret;
+	size_t triggerpin;
+	uint8_t trigsel2;
 	struct triggerinout triggerinout_conf;
 	struct triggerlut lut;
-	uint8_t regval;
-	uint8_t clock_bytes[sizeof(clockselect)];
-	size_t clock_idx;
+	uint8_t regval, cmd_bytes[4], *wrptr;
 
 	devc = sdi->priv;
 
-	if (sigma_convert_trigger(sdi) != SR_OK) {
-		sr_err("Failed to configure triggers.");
-		return SR_ERR;
+	/* Convert caller's trigger spec to driver's internal format. */
+	ret = sigma_convert_trigger(sdi);
+	if (ret != SR_OK) {
+		sr_err("Could not configure triggers.");
+		return ret;
 	}
 
-	/* If the samplerate has not been set, default to 200 kHz. */
-	if (devc->cur_firmware == -1) {
-		if ((ret = sigma_set_samplerate(sdi, SR_KHZ(200))) != SR_OK)
-			return ret;
+	/*
+	 * Setup the device's samplerate from the value which up to now
+	 * just got checked and stored. As a byproduct this can pick and
+	 * send firmware to the device, reduce the number of available
+	 * logic channels, etc.
+	 *
+	 * Determine an acquisition timeout from optionally configured
+	 * sample count or time limits. Which depends on the samplerate.
+	 * Force 50MHz samplerate when external clock is in use.
+	 */
+	if (devc->clock.use_ext_clock) {
+		if (devc->clock.samplerate != SR_MHZ(50))
+			sr_info("External clock, forcing 50MHz samplerate.");
+		devc->clock.samplerate = SR_MHZ(50);
 	}
+	ret = sigma_set_samplerate(sdi);
+	if (ret != SR_OK)
+		return ret;
+	ret = sigma_set_acquire_timeout(devc);
+	if (ret != SR_OK)
+		return ret;
 
 	/* Enter trigger programming mode. */
-	sigma_set_register(WRITE_TRIGGER_SELECT1, 0x20, devc);
+	trigsel2 = TRGSEL2_RESET;
+	ret = sigma_set_register(devc, WRITE_TRIGGER_SELECT2, trigsel2);
+	if (ret != SR_OK)
+		return ret;
 
-	triggerselect = 0;
-	if (devc->cur_samplerate >= SR_MHZ(100)) {
+	trigsel2 = 0;
+	if (devc->clock.samplerate >= SR_MHZ(100)) {
 		/* 100 and 200 MHz mode. */
-		sigma_set_register(WRITE_TRIGGER_SELECT1, 0x81, devc);
+		/* TODO Decipher the 0x81 magic number's purpose. */
+		ret = sigma_set_register(devc, WRITE_TRIGGER_SELECT2, 0x81);
+		if (ret != SR_OK)
+			return ret;
 
 		/* Find which pin to trigger on from mask. */
-		for (triggerpin = 0; triggerpin < 8; triggerpin++)
-			if ((devc->trigger.risingmask | devc->trigger.fallingmask) &
-			    (1 << triggerpin))
+		for (triggerpin = 0; triggerpin < 8; triggerpin++) {
+			if (devc->trigger.risingmask & BIT(triggerpin))
 				break;
+			if (devc->trigger.fallingmask & BIT(triggerpin))
+				break;
+		}
 
 		/* Set trigger pin and light LED on trigger. */
-		triggerselect = (1 << LEDSEL1) | (triggerpin & 0x7);
+		trigsel2 = triggerpin & TRGSEL2_PINS_MASK;
+		trigsel2 |= TRGSEL2_LEDSEL1;
 
 		/* Default rising edge. */
+		/* TODO Documentation disagrees, bit set means _rising_ edge. */
 		if (devc->trigger.fallingmask)
-			triggerselect |= 1 << 3;
+			trigsel2 |= TRGSEL2_PINPOL_RISE;
 
-	} else if (devc->cur_samplerate <= SR_MHZ(50)) {
-		/* All other modes. */
-		sigma_build_basic_trigger(&lut, devc);
+	} else if (devc->clock.samplerate <= SR_MHZ(50)) {
+		/* 50MHz firmware modes. */
 
-		sigma_write_trigger_lut(&lut, devc);
+		/* Translate application specs to hardware perspective. */
+		ret = sigma_build_basic_trigger(devc, &lut);
+		if (ret != SR_OK)
+			return ret;
 
-		triggerselect = (1 << LEDSEL1) | (1 << LEDSEL0);
+		/* Communicate resulting register values to the device. */
+		ret = sigma_write_trigger_lut(devc, &lut);
+		if (ret != SR_OK)
+			return ret;
+
+		trigsel2 = TRGSEL2_LEDSEL1 | TRGSEL2_LEDSEL0;
 	}
 
 	/* Setup trigger in and out pins to default values. */
-	memset(&triggerinout_conf, 0, sizeof(struct triggerinout));
-	triggerinout_conf.trgout_bytrigger = 1;
-	triggerinout_conf.trgout_enable = 1;
+	memset(&triggerinout_conf, 0, sizeof(triggerinout_conf));
+	triggerinout_conf.trgout_bytrigger = TRUE;
+	triggerinout_conf.trgout_enable = TRUE;
+	/* TODO
+	 * Verify the correctness of this implementation. The previous
+	 * version used to assign to a C language struct with bit fields
+	 * which is highly non-portable and hard to guess the resulting
+	 * raw memory layout or wire transfer content. The C struct's
+	 * field names did not match the vendor documentation's names.
+	 * Which means that I could not verify "on paper" either. Let's
+	 * re-visit this code later during research for trigger support.
+	 */
+	wrptr = cmd_bytes;
+	regval = 0;
+	if (triggerinout_conf.trgout_bytrigger)
+		regval |= TRGOPT_TRGOOUTEN;
+	write_u8_inc(&wrptr, regval);
+	regval &= ~TRGOPT_CLEAR_MASK;
+	if (triggerinout_conf.trgout_enable)
+		regval |= TRGOPT_TRGOEN;
+	write_u8_inc(&wrptr, regval);
+	ret = sigma_write_register(devc, WRITE_TRIGGER_OPTION,
+		cmd_bytes, wrptr - cmd_bytes);
+	if (ret != SR_OK)
+		return ret;
 
-	sigma_write_register(WRITE_TRIGGER_OPTION,
-			     (uint8_t *) &triggerinout_conf,
-			     sizeof(struct triggerinout), devc);
+	/* Leave trigger programming mode. */
+	ret = sigma_set_register(devc, WRITE_TRIGGER_SELECT2, trigsel2);
+	if (ret != SR_OK)
+		return ret;
 
-	/* Go back to normal mode. */
-	sigma_set_register(WRITE_TRIGGER_SELECT1, triggerselect, devc);
-
-	/* Set clock select register. */
-	clockselect.async = 0;
-	clockselect.fraction = 1 - 1;		/* Divider 1. */
-	clockselect.disabled_channels = 0x0000;	/* All channels enabled. */
-	if (devc->cur_samplerate == SR_MHZ(200)) {
-		/* Enable 4 channels. */
-		clockselect.disabled_channels = 0xf0ff;
-	} else if (devc->cur_samplerate == SR_MHZ(100)) {
-		/* Enable 8 channels. */
-		clockselect.disabled_channels = 0x00ff;
+	/*
+	 * Samplerate dependent clock and channels configuration. Some
+	 * channels by design are not available at higher clock rates.
+	 * Register layout differs between firmware variants (depth 1
+	 * with LSB channel mask above 50MHz, depth 4 with more details
+	 * up to 50MHz).
+	 *
+	 * Derive a mask where bits are set for unavailable channels.
+	 * Either send the single byte, or the full byte sequence.
+	 */
+	pindis_mask = ~BITS_MASK(devc->interp.num_channels);
+	if (devc->clock.samplerate > SR_MHZ(50)) {
+		ret = sigma_set_register(devc, WRITE_CLOCK_SELECT,
+			pindis_mask & 0xff);
 	} else {
-		/*
-		 * 50 MHz mode, or fraction thereof. The 50MHz reference
-		 * can get divided by any integer in the range 1 to 256.
-		 * Divider minus 1 gets written to the hardware.
-		 * (The driver lists a discrete set of sample rates, but
-		 * all of them fit the above description.)
-		 */
-		clockselect.fraction = SR_MHZ(50) / devc->cur_samplerate - 1;
+		wrptr = cmd_bytes;
+		/* Select 50MHz base clock, and divider. */
+		async = 0;
+		div = SR_MHZ(50) / devc->clock.samplerate - 1;
+		if (devc->clock.use_ext_clock) {
+			async = CLKSEL_CLKSEL8;
+			div = devc->clock.clock_pin + 1;
+			switch (devc->clock.clock_edge) {
+			case SIGMA_CLOCK_EDGE_RISING:
+				div |= CLKSEL_RISING;
+				break;
+			case SIGMA_CLOCK_EDGE_FALLING:
+				div |= CLKSEL_FALLING;
+				break;
+			case SIGMA_CLOCK_EDGE_EITHER:
+				div |= CLKSEL_RISING;
+				div |= CLKSEL_FALLING;
+				break;
+			}
+		}
+		write_u8_inc(&wrptr, async);
+		write_u8_inc(&wrptr, div);
+		write_u16be_inc(&wrptr, pindis_mask);
+		ret = sigma_write_register(devc, WRITE_CLOCK_SELECT,
+			cmd_bytes, wrptr - cmd_bytes);
 	}
-	clock_idx = 0;
-	clock_bytes[clock_idx++] = clockselect.async;
-	clock_bytes[clock_idx++] = clockselect.fraction;
-	clock_bytes[clock_idx++] = clockselect.disabled_channels & 0xff;
-	clock_bytes[clock_idx++] = clockselect.disabled_channels >> 8;
-	sigma_write_register(WRITE_CLOCK_SELECT, clock_bytes, clock_idx, devc);
+	if (ret != SR_OK)
+		return ret;
 
 	/* Setup maximum post trigger time. */
-	sigma_set_register(WRITE_POST_TRIGGER,
-			   (devc->capture_ratio * 255) / 100, devc);
+	ret = sigma_set_register(devc, WRITE_POST_TRIGGER,
+		(devc->capture_ratio * 255) / 100);
+	if (ret != SR_OK)
+		return ret;
 
 	/* Start acqusition. */
-	devc->start_time = g_get_monotonic_time();
-	regval =  WMR_TRGRES | WMR_SDRAMWRITEEN;
-#if ASIX_SIGMA_WITH_TRIGGER
-	regval |= WMR_TRGEN;
-#endif
-	sigma_set_register(WRITE_MODE, regval, devc);
+	regval = WMR_TRGRES | WMR_SDRAMWRITEEN;
+	if (devc->use_triggers)
+		regval |= WMR_TRGEN;
+	ret = sigma_set_register(devc, WRITE_MODE, regval);
+	if (ret != SR_OK)
+		return ret;
 
-	std_session_send_df_header(sdi);
+	ret = std_session_send_df_header(sdi);
+	if (ret != SR_OK)
+		return ret;
 
 	/* Add capture source. */
-	sr_session_source_add(sdi->session, -1, 0, 10, sigma_receive_data, (void *)sdi);
+	ret = sr_session_source_add(sdi->session, -1, 0, 10,
+		sigma_receive_data, (void *)sdi);
+	if (ret != SR_OK)
+		return ret;
 
-	devc->state.state = SIGMA_CAPTURE;
+	devc->state = SIGMA_CAPTURE;
 
 	return SR_OK;
 }
@@ -371,11 +618,11 @@ static int dev_acquisition_stop(struct sr_dev_inst *sdi)
 	 * already. The detour is required to have sample data retrieved
 	 * for forced acquisition stops.
 	 */
-	if (devc->state.state == SIGMA_CAPTURE) {
-		devc->state.state = SIGMA_STOPPING;
+	if (devc->state == SIGMA_CAPTURE) {
+		devc->state = SIGMA_STOPPING;
 	} else {
-		devc->state.state = SIGMA_IDLE;
-		sr_session_source_remove(sdi->session, -1);
+		devc->state = SIGMA_IDLE;
+		(void)sr_session_source_remove(sdi->session, -1);
 	}
 
 	return SR_OK;

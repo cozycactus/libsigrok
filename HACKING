@@ -61,8 +61,9 @@ This is a rough overview of what you need to do in order to add a new driver
 (using the Tondaj SL-814 device as example). It's basically what the
 'new-driver' script (see above) does for you:
 
- - Makefile.am: Add HW_TONDAJ_SL_814 and add to libsigrok_la_SOURCES.
- - configure.ac: Add a DRIVER() and DRIVER2() call.
+ - Makefile.am: Add to src_libdrivers_la_SOURCES under the HW_TONDAJ_SL_814
+   condition.
+ - configure.ac: Add an SR_DRIVER() call.
  - src/drivers.c: Add a tondaj_sl_814_driver_info entry in two places.
  - src/hardware/tondaj-sl-814/ directory: Add api.c, protocol.c, protocol.h.
 
@@ -163,7 +164,9 @@ Doxygen
 
  - Mark private functions (SR_PRIV) with /** @private */, so that Doxygen
    doesn't include them in the output. Functions that are "static" anyway
-   don't need to be marked like this.
+   don't need to be marked like this. Functions in non-public files that
+   are explicitly excluded in Doxyfile don't need to be marked either.
+   Don't use @internal, always use @private instead.
 
  - Mark private variables/#defines with /** @cond PRIVATE */ and
    /** @endcond */, so that Doxygen doesn't include them in the output.

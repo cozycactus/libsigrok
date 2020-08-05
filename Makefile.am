@@ -50,7 +50,9 @@ lib_LTLIBRARIES = libsigrok.la
 # Backend files
 libsigrok_la_SOURCES = \
 	src/backend.c \
+	src/binary_helpers.c \
 	src/conversion.c \
+	src/crc.c \
 	src/device.c \
 	src/session.c \
 	src/session_file.c \
@@ -71,11 +73,13 @@ libsigrok_la_SOURCES = \
 # Input modules
 libsigrok_la_SOURCES += \
 	src/input/input.c \
+	src/input/feed_queue.c \
 	src/input/binary.c \
 	src/input/chronovu_la8.c \
 	src/input/csv.c \
 	src/input/logicport.c \
 	src/input/raw_analog.c \
+	src/input/saleae.c \
 	src/input/trace32_ad.c \
 	src/input/vcd.c \
 	src/input/wav.c \
@@ -95,6 +99,7 @@ libsigrok_la_SOURCES += \
 	src/output/ols.c \
 	src/output/srzip.c \
 	src/output/vcd.c \
+	src/output/wavedrom.c \
 	src/output/null.c
 
 # Transform modules
@@ -116,9 +121,21 @@ libsigrok_la_SOURCES += \
 	src/scpi/vxi_xdr.c \
 	src/scpi/vxi.h
 endif
+# if HAVE_BLUETOOTH
+libsigrok_la_SOURCES += \
+	src/bt/bt_bluez.c
+# endif
 if NEED_SERIAL
 libsigrok_la_SOURCES += \
 	src/serial.c \
+	src/serial_bt.c \
+	src/serial_hid.c \
+	src/serial_hid.h \
+	src/serial_hid_bu86x.c \
+	src/serial_hid_ch9325.c \
+	src/serial_hid_cp2110.c \
+	src/serial_hid_victor.c \
+	src/serial_libsp.c \
 	src/scpi/scpi_serial.c
 endif
 if NEED_USB
@@ -148,6 +165,7 @@ endif
 libsigrok_la_SOURCES += \
 	src/dmm/asycii.c \
 	src/dmm/bm25x.c \
+	src/dmm/bm86x.c \
 	src/dmm/dtm0660.c \
 	src/dmm/eev121gw.c \
 	src/dmm/es519xx.c \
@@ -166,7 +184,8 @@ libsigrok_la_SOURCES += \
 # Hardware (LCR chip parsers)
 if NEED_SERIAL
 libsigrok_la_SOURCES += \
-	src/lcr/es51919.c
+	src/lcr/es51919.c \
+	src/lcr/vc4080.c
 endif
 
 # Hardware (Scale protocol parsers)
@@ -238,12 +257,6 @@ src_libdrivers_la_SOURCES += \
 	src/hardware/beaglelogic/api.c \
 	src/hardware/beaglelogic/beaglelogic_native.c \
 	src/hardware/beaglelogic/beaglelogic_tcp.c
-endif
-if HW_BRYMEN_BM86X
-src_libdrivers_la_SOURCES += \
-	src/hardware/brymen-bm86x/protocol.h \
-	src/hardware/brymen-bm86x/protocol.c \
-	src/hardware/brymen-bm86x/api.c
 endif
 if HW_BRYMEN_DMM
 src_libdrivers_la_SOURCES += \
@@ -414,6 +427,12 @@ src_libdrivers_la_SOURCES += \
 	src/hardware/kern-scale/protocol.c \
 	src/hardware/kern-scale/api.c
 endif
+if HW_KINGST_LA2016
+src_libdrivers_la_SOURCES += \
+	src/hardware/kingst-la2016/protocol.h \
+	src/hardware/kingst-la2016/protocol.c \
+	src/hardware/kingst-la2016/api.c
+endif
 if HW_KORAD_KAXXXXP
 src_libdrivers_la_SOURCES += \
 	src/hardware/korad-kaxxxxp/protocol.h \
@@ -444,6 +463,12 @@ src_libdrivers_la_SOURCES += \
 	src/hardware/manson-hcs-3xxx/protocol.c \
 	src/hardware/manson-hcs-3xxx/api.c
 endif
+if HW_MASTECH_MS6514
+src_libdrivers_la_SOURCES += \
+	src/hardware/mastech-ms6514/protocol.h \
+	src/hardware/mastech-ms6514/protocol.c \
+	src/hardware/mastech-ms6514/api.c
+endif
 if HW_MAYNUO_M97
 src_libdrivers_la_SOURCES += \
 	src/hardware/maynuo-m97/protocol.h \
@@ -461,6 +486,12 @@ src_libdrivers_la_SOURCES += \
 	src/hardware/mic-985xx/protocol.h \
 	src/hardware/mic-985xx/protocol.c \
 	src/hardware/mic-985xx/api.c
+endif
+if HW_MOOSHIMETER_DMM
+src_libdrivers_la_SOURCES += \
+	src/hardware/mooshimeter-dmm/protocol.h \
+	src/hardware/mooshimeter-dmm/protocol.c \
+	src/hardware/mooshimeter-dmm/api.c
 endif
 if HW_MOTECH_LPS_30X
 src_libdrivers_la_SOURCES += \
@@ -497,6 +528,18 @@ src_libdrivers_la_SOURCES += \
 	src/hardware/rdtech-dps/protocol.h \
 	src/hardware/rdtech-dps/protocol.c \
 	src/hardware/rdtech-dps/api.c
+endif
+if HW_RDTECH_UM
+src_libdrivers_la_SOURCES += \
+	src/hardware/rdtech-um/protocol.h \
+	src/hardware/rdtech-um/protocol.c \
+	src/hardware/rdtech-um/api.c
+endif
+if HW_RDTECH_TC
+src_libdrivers_la_SOURCES += \
+	src/hardware/rdtech-tc/protocol.h \
+	src/hardware/rdtech-tc/protocol.c \
+	src/hardware/rdtech-tc/api.c
 endif
 if HW_RIGOL_DS
 src_libdrivers_la_SOURCES += \
@@ -543,6 +586,8 @@ src_libdrivers_la_SOURCES += \
 endif
 if HW_SERIAL_LCR
 src_libdrivers_la_SOURCES += \
+	src/hardware/serial-lcr/protocol.h \
+	src/hardware/serial-lcr/protocol.c \
 	src/hardware/serial-lcr/api.c
 endif
 if HW_SIGLENT_SDS
@@ -591,17 +636,17 @@ src_libdrivers_la_SOURCES += \
 	src/hardware/uni-t-dmm/protocol.c \
 	src/hardware/uni-t-dmm/api.c
 endif
+if HW_UNI_T_UT181A
+src_libdrivers_la_SOURCES += \
+	src/hardware/uni-t-ut181a/protocol.h \
+	src/hardware/uni-t-ut181a/protocol.c \
+	src/hardware/uni-t-ut181a/api.c
+endif
 if HW_UNI_T_UT32X
 src_libdrivers_la_SOURCES += \
 	src/hardware/uni-t-ut32x/protocol.h \
 	src/hardware/uni-t-ut32x/protocol.c \
 	src/hardware/uni-t-ut32x/api.c
-endif
-if HW_VICTOR_DMM
-src_libdrivers_la_SOURCES += \
-	src/hardware/victor-dmm/protocol.h \
-	src/hardware/victor-dmm/protocol.c \
-	src/hardware/victor-dmm/api.c
 endif
 if HW_YOKOGAWA_DLM
 src_libdrivers_la_SOURCES += \
@@ -704,7 +749,8 @@ tests_main_SOURCES = \
 	tests/driver_all.c \
 	tests/device.c \
 	tests/trigger.c \
-	tests/analog.c
+	tests/analog.c \
+	tests/conv.c
 
 tests_main_LDADD = libsigrok.la $(SR_EXTRA_LIBS) $(TESTS_LIBS)
 

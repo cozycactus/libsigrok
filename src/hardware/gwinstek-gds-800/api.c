@@ -30,7 +30,7 @@ static const uint32_t drvopts[] = {
 };
 
 static const uint32_t devopts[] = {
-	SR_CONF_LIMIT_FRAMES | SR_CONF_SET,
+	SR_CONF_LIMIT_FRAMES | SR_CONF_GET | SR_CONF_SET,
 	SR_CONF_SAMPLERATE | SR_CONF_GET,
 };
 
@@ -132,6 +132,9 @@ static int config_get(uint32_t key, GVariant **data,
 	case SR_CONF_SAMPLERATE:
 		*data = g_variant_new_uint64(devc->sample_rate);
 		break;
+	case SR_CONF_LIMIT_FRAMES:
+		*data = g_variant_new_uint64(devc->frame_limit);
+		break;
 	default:
 		return SR_ERR_NA;
 	}
@@ -189,17 +192,13 @@ static int dev_acquisition_stop(struct sr_dev_inst *sdi)
 {
 	struct sr_scpi_dev_inst *scpi;
 	struct dev_context *devc;
-	struct sr_datafeed_packet packet;
 
 	scpi = sdi->conn;
 	devc = sdi->priv;
 
 	if (devc->df_started) {
-		packet.type = SR_DF_FRAME_END;
-		sr_session_send(sdi, &packet);
-
+		std_session_send_df_frame_end(sdi);
 		std_session_send_df_end(sdi);
-
 		devc->df_started = FALSE;
 	}
 

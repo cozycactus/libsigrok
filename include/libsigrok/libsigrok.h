@@ -233,6 +233,8 @@ enum sr_mq {
 	SR_MQ_MASS,
 	/** Harmonic ratio */
 	SR_MQ_HARMONIC_RATIO,
+	/** Energy. */
+	SR_MQ_ENERGY,
 
 	/* Update sr_key_info_mq[] (hwdriver.c) upon changes! */
 };
@@ -999,6 +1001,27 @@ enum sr_configkey {
 
 	/** Offset of a source without strictly-defined MQ. */
 	SR_CONF_OFFSET,
+
+	/** The device supports setting a pattern for the logic trigger. */
+	SR_CONF_TRIGGER_PATTERN,
+
+	/** High resolution mode. */
+	SR_CONF_HIGH_RESOLUTION,
+
+	/** Peak detection. */
+	SR_CONF_PEAK_DETECTION,
+
+	/** Logic threshold: predefined levels (TTL, ECL, CMOS, etc). */
+	SR_CONF_LOGIC_THRESHOLD,
+
+	/** Logic threshold: custom numerical value. */
+	SR_CONF_LOGIC_THRESHOLD_CUSTOM,
+
+	/** The measurement range of a DMM or the output range of a power supply. */
+	SR_CONF_RANGE,
+
+	/** The number of digits (e.g. for a DMM). */
+	SR_CONF_DIGITS,
 
 	/* Update sr_key_info_config[] (hwdriver.c) upon changes! */
 

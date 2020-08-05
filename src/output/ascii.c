@@ -37,19 +37,18 @@
 #define DEFAULT_ASCII_CHARS ".\"\\/"
 
 struct context {
-	unsigned int num_enabled_channels;
-	int spl;
-	int bit_cnt;
-	int spl_cnt;
+	size_t num_enabled_channels;
+	size_t spl;
+	size_t spl_cnt;
 	int trigger;
 	uint64_t samplerate;
 	int *channel_index;
-	char **channel_names;
+	char **aligned_names;
+	size_t max_namelen;
 	char **line_values;
 	uint8_t *prev_sample;
 	gboolean header_done;
 	GString **lines;
-	GString *header;
 	const char *charset;
 	gboolean edges;
 };
@@ -59,7 +58,7 @@ static int init(struct sr_output *o, GHashTable *options)
 	struct context *ctx;
 	struct sr_channel *ch;
 	GSList *l;
-	unsigned int i, j;
+	size_t j, max_namelen, alloc_line_len;
 
 	if (!o || !o->sdi)
 		return SR_ERR_ARG;
@@ -84,22 +83,38 @@ static int init(struct sr_output *o, GHashTable *options)
 			continue;
 		ctx->num_enabled_channels++;
 	}
-	ctx->channel_index = g_malloc(sizeof(int) * ctx->num_enabled_channels);
-	ctx->channel_names = g_malloc(sizeof(char *) * ctx->num_enabled_channels);
-	ctx->lines = g_malloc(sizeof(GString *) * ctx->num_enabled_channels);
-	ctx->prev_sample = g_malloc(g_slist_length(o->sdi->channels));
+	ctx->channel_index = g_malloc0(sizeof(ctx->channel_index[0]) * ctx->num_enabled_channels);
+	ctx->aligned_names = g_malloc0(sizeof(ctx->aligned_names[0]) * ctx->num_enabled_channels);
+	ctx->lines = g_malloc0(sizeof(ctx->lines[0]) * ctx->num_enabled_channels);
+	ctx->prev_sample = g_malloc0(g_slist_length(o->sdi->channels));
 
-	j = 0;
-	for (i = 0, l = o->sdi->channels; l; l = l->next, i++) {
+	/* Get the maximum length across all active logic channels. */
+	max_namelen = 0;
+	for (l = o->sdi->channels; l; l = l->next) {
 		ch = l->data;
 		if (ch->type != SR_CHANNEL_LOGIC)
 			continue;
 		if (!ch->enabled)
 			continue;
+		max_namelen = MAX(max_namelen, strlen(ch->name));
+	}
+	ctx->max_namelen = max_namelen;
+
+	alloc_line_len = ctx->max_namelen + 8 + ctx->spl;
+	j = 0;
+	for (l = o->sdi->channels; l; l = l->next) {
+		ch = l->data;
+		if (ch->type != SR_CHANNEL_LOGIC)
+			continue;
+		if (!ch->enabled)
+			continue;
+
 		ctx->channel_index[j] = ch->index;
-		ctx->channel_names[j] = ch->name;
-		ctx->lines[j] = g_string_sized_new(80);
-		g_string_printf(ctx->lines[j], "%s:", ch->name);
+		ctx->aligned_names[j] = g_strdup_printf("%*s", (int)max_namelen, ch->name);
+
+		ctx->lines[j] = g_string_sized_new(alloc_line_len);
+		g_string_printf(ctx->lines[j], "%s:", ctx->aligned_names[j]);
+
 		j++;
 	}
 
@@ -111,7 +126,7 @@ static GString *gen_header(const struct sr_output *o)
 	struct context *ctx;
 	GVariant *gvar;
 	GString *header;
-	int num_channels;
+	size_t num_channels;
 	char *samplerate_s;
 
 	ctx = o->priv;
@@ -126,7 +141,7 @@ static GString *gen_header(const struct sr_output *o)
 	header = g_string_sized_new(512);
 	g_string_printf(header, "%s %s\n", PACKAGE_NAME, sr_package_version_string_get());
 	num_channels = g_slist_length(o->sdi->channels);
-	g_string_append_printf(header, "Acquisition with %d/%d channels",
+	g_string_append_printf(header, "Acquisition with %zu/%zu channels",
 			ctx->num_enabled_channels, num_channels);
 	if (ctx->samplerate != 0) {
 		samplerate_s = sr_samplerate_string(ctx->samplerate);
@@ -138,6 +153,25 @@ static GString *gen_header(const struct sr_output *o)
 	return header;
 }
 
+static void maybe_add_trigger(struct context *ctx, GString *out)
+{
+	int offset;
+
+	if (ctx->trigger < 0)
+		return;
+	offset = ctx->trigger;
+	ctx->trigger = -1;
+
+	/*
+	 * Sample data lines have one character per bit and
+	 * no separator between bytes. Align trigger marker
+	 * to this layout.
+	 */
+	g_string_append_printf(out, "%*s:%*s %d\n",
+		(int)ctx->max_namelen, "T",
+		offset + 1, "^", offset);
+}
+
 static int receive(const struct sr_output *o, const struct sr_datafeed_packet *packet,
 		GString **out)
 {
@@ -146,9 +180,12 @@ static int receive(const struct sr_output *o, const struct sr_datafeed_packet *p
 	const struct sr_config *src;
 	GSList *l;
 	struct context *ctx;
-	int idx, offset, curbit, prevbit;
-	uint64_t i, j;
-	gchar *p, c;
+	size_t idx, i, j;
+	size_t num_samples;
+	const uint8_t *curr_sample;
+	size_t bytepos;
+	uint8_t bitmask, curbit, prevbit;
+	char c;
 	size_t charidx;
 
 	*out = NULL;
@@ -174,17 +211,21 @@ static int receive(const struct sr_output *o, const struct sr_datafeed_packet *p
 		if (!ctx->header_done) {
 			*out = gen_header(o);
 			ctx->header_done = TRUE;
-		} else
+		} else {
 			*out = g_string_sized_new(512);
+		}
 
 		logic = packet->payload;
-		for (i = 0; i <= logic->length - logic->unitsize; i += logic->unitsize) {
+		num_samples = logic->length / logic->unitsize;
+		curr_sample = logic->data;
+		while (num_samples--) {
 			ctx->spl_cnt++;
 			for (j = 0; j < ctx->num_enabled_channels; j++) {
 				idx = ctx->channel_index[j];
-				p = logic->data + i + idx / 8;
-				curbit = *p & (1 << (idx % 8));
-				prevbit = (ctx->prev_sample[idx / 8] & ((uint8_t) 1 << (idx % 8)));
+				bytepos = idx / 8;
+				bitmask = 1U << (idx % 8);
+				curbit = curr_sample[bytepos] & bitmask;
+				prevbit = ctx->prev_sample[bytepos] & bitmask;
 
 				charidx = curbit ? 1 : 0;
 				if (ctx->edges && ctx->spl_cnt > 1) {
@@ -198,23 +239,16 @@ static int receive(const struct sr_output *o, const struct sr_datafeed_packet *p
 					/* Flush line buffers. */
 					g_string_append_len(*out, ctx->lines[j]->str, ctx->lines[j]->len);
 					g_string_append_c(*out, '\n');
-					if (j == ctx->num_enabled_channels - 1 && ctx->trigger > -1) {
-						/*
-						 * Sample data lines have one character per bit and
-						 * no separator between bytes. Align trigger marker
-						 * to this layout.
-						 */
-						offset = ctx->trigger;
-						g_string_append_printf(*out, "T:%*s^ %d\n", offset, "", ctx->trigger);
-						ctx->trigger = -1;
-					}
-					g_string_printf(ctx->lines[j], "%s:", ctx->channel_names[j]);
+					if (j + 1 == ctx->num_enabled_channels)
+						maybe_add_trigger(ctx, *out);
+					g_string_printf(ctx->lines[j], "%s:", ctx->aligned_names[j]);
 				}
 			}
 			if (ctx->spl_cnt == ctx->spl)
 				/* Line buffers were already flushed. */
 				ctx->spl_cnt = 0;
-			memcpy(ctx->prev_sample, logic->data + i, logic->unitsize);
+			memcpy(ctx->prev_sample, curr_sample, logic->unitsize);
+			curr_sample += logic->unitsize;
 		}
 		break;
 	case SR_DF_END:
@@ -225,6 +259,7 @@ static int receive(const struct sr_output *o, const struct sr_datafeed_packet *p
 				g_string_append_len(*out, ctx->lines[i]->str, ctx->lines[i]->len);
 				g_string_append_c(*out, '\n');
 			}
+			maybe_add_trigger(ctx, *out);
 		}
 		break;
 	}
@@ -235,7 +270,7 @@ static int receive(const struct sr_output *o, const struct sr_datafeed_packet *p
 static int cleanup(struct sr_output *o)
 {
 	struct context *ctx;
-	unsigned int i;
+	size_t i;
 
 	if (!o)
 		return SR_ERR_ARG;
@@ -245,9 +280,11 @@ static int cleanup(struct sr_output *o)
 
 	g_free(ctx->channel_index);
 	g_free(ctx->prev_sample);
-	g_free(ctx->channel_names);
-	for (i = 0; i < ctx->num_enabled_channels; i++)
+	for (i = 0; i < ctx->num_enabled_channels; i++) {
+		g_free(ctx->aligned_names[i]);
 		g_string_free(ctx->lines[i], TRUE);
+	}
+	g_free(ctx->aligned_names);
 	g_free(ctx->lines);
 	g_free((gpointer)ctx->charset);
 	g_free(ctx);

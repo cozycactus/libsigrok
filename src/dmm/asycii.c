@@ -446,7 +446,7 @@ static gboolean flags_valid(const struct asycii_info *info)
 	return TRUE;
 }
 
-#ifdef HAVE_LIBSERIALPORT
+#ifdef HAVE_SERIAL_COMM
 /**
  * Arrange for the reception of another measurement from the DMM.
  *
@@ -455,8 +455,6 @@ static gboolean flags_valid(const struct asycii_info *info)
  * without the PC's intervention.
  *
  * @param[in]	serial The serial connection.
- *
- * @private
  */
 SR_PRIV int sr_asycii_packet_request(struct sr_serial_dev_inst *serial)
 {

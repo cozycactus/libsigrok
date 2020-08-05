@@ -185,6 +185,20 @@ static struct sr_key_info sr_key_info_config[] = {
 		"External clock source", NULL},
 	{SR_CONF_OFFSET, SR_T_FLOAT, "offset",
 		"Offset", NULL},
+	{SR_CONF_TRIGGER_PATTERN, SR_T_STRING, "triggerpattern",
+		"Trigger pattern", NULL},
+	{SR_CONF_HIGH_RESOLUTION, SR_T_BOOL, "highresolution",
+		"High resolution", NULL},
+	{SR_CONF_PEAK_DETECTION, SR_T_BOOL, "peakdetection",
+		"Peak detection", NULL},
+	{SR_CONF_LOGIC_THRESHOLD, SR_T_STRING, "logic_threshold",
+		"Logic threshold (predefined)", NULL},
+	{SR_CONF_LOGIC_THRESHOLD_CUSTOM, SR_T_FLOAT, "logic_threshold_custom",
+		"Logic threshold (custom)", NULL},
+	{SR_CONF_RANGE, SR_T_STRING, "range",
+		"Range", NULL},
+	{SR_CONF_DIGITS, SR_T_STRING, "digits",
+		"Digits", NULL},
 
 	/* Special stuff */
 	{SR_CONF_SESSIONFILE, SR_T_STRING, "sessionfile",
@@ -256,6 +270,7 @@ static struct sr_key_info sr_key_info_mq[] = {
 	{SR_MQ_APPARENT_POWER, 0, "apparent_power", "Apparent power", NULL},
 	{SR_MQ_MASS, 0, "mass", "Mass", NULL},
 	{SR_MQ_HARMONIC_RATIO, 0, "harmonic_ratio", "Harmonic ratio", NULL},
+	{SR_MQ_ENERGY, 0, "energy", "Energy", NULL},
 	ALL_ZERO
 };
 

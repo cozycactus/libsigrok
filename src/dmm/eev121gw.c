@@ -22,8 +22,6 @@
  *
  * EEVblog 121GW 19-bytes binary protocol parser.
  *
- * @internal
- *
  * Note that this protocol is different from other meters. We need not
  * decode the LCD presentation (segments a-g and dot of seven segment
  * displays). Neither need we decode a textual presentation consisting
@@ -691,7 +689,7 @@ SR_PRIV gboolean sr_eev121gw_packet_valid(const uint8_t *buf)
  * @return SR_OK upon success, SR_ERR upon failure. Upon errors, the
  *         'analog' variable contents are undefined and should not be used.
  */
-SR_PRIV int sr_eev121gw_parse(const uint8_t *buf, float *floatval,
+static int sr_eev121gw_parse(const uint8_t *buf, float *floatval,
 		struct sr_datafeed_analog *analog, void *info)
 {
 	struct eev121gw_info *info_local;

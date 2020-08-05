@@ -20,7 +20,6 @@
 /**
  * @file
  * Software limits helper functions
- * @internal
  */
 
 #include <config.h>
@@ -44,8 +43,7 @@
  */
 SR_PRIV void sr_sw_limits_init(struct sr_sw_limits *limits)
 {
-	limits->limit_samples = 0;
-	limits->limit_msec = 0;
+	memset(limits, 0, sizeof(*limits));
 }
 
 /**
@@ -59,12 +57,15 @@ SR_PRIV void sr_sw_limits_init(struct sr_sw_limits *limits)
  * @param data config item data
  * @return SR_ERR_NA if @p key is not a supported limit, SR_OK otherwise
  */
-SR_PRIV int sr_sw_limits_config_get(struct sr_sw_limits *limits, uint32_t key,
+SR_PRIV int sr_sw_limits_config_get(const struct sr_sw_limits *limits, uint32_t key,
 	GVariant **data)
 {
 	switch (key) {
 	case SR_CONF_LIMIT_SAMPLES:
 		*data = g_variant_new_uint64(limits->limit_samples);
+		break;
+	case SR_CONF_LIMIT_FRAMES:
+		*data = g_variant_new_uint64(limits->limit_frames);
 		break;
 	case SR_CONF_LIMIT_MSEC:
 		*data = g_variant_new_uint64(limits->limit_msec / 1000);
@@ -94,6 +95,9 @@ SR_PRIV int sr_sw_limits_config_set(struct sr_sw_limits *limits, uint32_t key,
 	case SR_CONF_LIMIT_SAMPLES:
 		limits->limit_samples = g_variant_get_uint64(data);
 		break;
+	case SR_CONF_LIMIT_FRAMES:
+		limits->limit_frames = g_variant_get_uint64(data);
+		break;
 	case SR_CONF_LIMIT_MSEC:
 		limits->limit_msec = g_variant_get_uint64(data) * 1000;
 		break;
@@ -115,6 +119,7 @@ SR_PRIV int sr_sw_limits_config_set(struct sr_sw_limits *limits, uint32_t key,
 SR_PRIV void sr_sw_limits_acquisition_start(struct sr_sw_limits *limits)
 {
 	limits->samples_read = 0;
+	limits->frames_read = 0;
 	limits->start_time = g_get_monotonic_time();
 }
 
@@ -138,7 +143,15 @@ SR_PRIV gboolean sr_sw_limits_check(struct sr_sw_limits *limits)
 		}
 	}
 
-	if (limits->limit_msec) {
+	if (limits->limit_frames) {
+		if (limits->frames_read >= limits->limit_frames) {
+			sr_dbg("Requested number of frames (%" PRIu64
+			       ") reached.", limits->limit_frames);
+			return TRUE;
+		}
+	}
+
+	if (limits->limit_msec && limits->start_time) {
 		guint64 now;
 		now = g_get_monotonic_time();
 		if (now > limits->start_time &&
@@ -153,7 +166,7 @@ SR_PRIV gboolean sr_sw_limits_check(struct sr_sw_limits *limits)
 }
 
 /**
- * Update the amount samples that have been read
+ * Update the amount of samples that have been read
  *
  * Update the amount of samples that have been read in the current data
  * acquisition run. For each invocation @p samples_read will be accumulated and
@@ -167,4 +180,21 @@ SR_PRIV void sr_sw_limits_update_samples_read(struct sr_sw_limits *limits,
 	uint64_t samples_read)
 {
 	limits->samples_read += samples_read;
+}
+
+/**
+ * Update the amount of frames that have been read
+ *
+ * Update the amount of frames that have been read in the current data
+ * acquisition run. For each invocation @p frames_read will be accumulated and
+ * once the configured frame limit has been reached sr_sw_limits_check() will
+ * return TRUE.
+ *
+ * @param limits software limits instance
+ * @param frames_read the amount of frames that have been read
+ */
+SR_PRIV void sr_sw_limits_update_frames_read(struct sr_sw_limits *limits,
+	uint64_t frames_read)
+{
+	limits->frames_read += frames_read;
 }

@@ -42,6 +42,7 @@ enum protocol_version {
 	PROTOCOL_V2, /* DS1000 */
 	PROTOCOL_V3, /* DS2000, DSO1000 */
 	PROTOCOL_V4, /* DS1000Z */
+	PROTOCOL_V5, /* MSO5000 */
 };
 
 enum data_format {
@@ -128,6 +129,7 @@ struct dev_context {
 	gboolean digital_channels[MAX_DIGITAL_CHANNELS];
 	gboolean la_enabled;
 	float timebase;
+	float sample_rate;
 	float attenuation[MAX_ANALOG_CHANNELS];
 	float vdiv[MAX_ANALOG_CHANNELS];
 	int vert_reference[MAX_ANALOG_CHANNELS];
@@ -142,6 +144,8 @@ struct dev_context {
 
 	/* Number of frames received in total. */
 	uint64_t num_frames;
+	/* Number of frames available from the Segmented data source */
+	uint64_t num_frames_segmented;
 	/* GSList entry for the current channel. */
 	GSList *channel_entry;
 	/* Number of bytes received for current channel. */

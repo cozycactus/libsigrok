@@ -1,7 +1,7 @@
 /*
  * This file is part of the libsigrok project.
  *
- * Copyright (C) 2014 Aurelien Jacobs <aurel@gnuage.org>
+ * Copyright (C) 2015 Aurelien Jacobs <aurel@gnuage.org>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,22 +17,27 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef LIBSIGROK_HARDWARE_BRYMEN_BM86X_PROTOCOL_H
-#define LIBSIGROK_HARDWARE_BRYMEN_BM86X_PROTOCOL_H
-
+#include <config.h>
 #include <stdint.h>
-#include <glib.h>
 #include <libsigrok/libsigrok.h>
 #include "libsigrok-internal.h"
 
-#define LOG_PREFIX "brymen-bm86x"
+SR_PRIV uint16_t sr_crc16(uint16_t crc, const uint8_t *buffer, int len)
+{
+	int i;
 
-struct dev_context {
-	struct sr_sw_limits sw_limits;
-	int detached_kernel_driver; /**< Whether kernel driver was detached or not */
-	int interrupt_pending;
-};
+	if (!buffer || len < 0)
+		return crc;
 
-SR_PRIV int brymen_bm86x_receive_data(int fd, int revents, void *cb_data);
+	while (len--) {
+		crc ^= *buffer++;
+		for (i = 0; i < 8; i++) {
+			int carry = crc & 1;
+			crc >>= 1;
+			if (carry)
+				crc ^= 0xA001;
+		}
+	}
 
-#endif
+	return crc;
+}
