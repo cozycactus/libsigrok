@@ -55,7 +55,7 @@ static const uint32_t drvopts[] = {
 static const uint32_t devopts[] = {
 	SR_CONF_CONTINUOUS,
 	SR_CONF_CONN | SR_CONF_GET,
-	SR_CONF_LIMIT_FRAMES | SR_CONF_SET,
+	SR_CONF_LIMIT_FRAMES | SR_CONF_GET | SR_CONF_SET,
 	SR_CONF_TIMEBASE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
 	SR_CONF_NUM_HDIV | SR_CONF_GET,
 	SR_CONF_CAPTURE_RATIO | SR_CONF_GET | SR_CONF_SET,
@@ -477,6 +477,9 @@ static int config_get(uint32_t key, GVariant **data,
 		case SR_CONF_CAPTURE_RATIO:
 			*data = g_variant_new_uint64(devc->capture_ratio);
 			break;
+		case SR_CONF_LIMIT_FRAMES:
+			*data = g_variant_new_uint64(devc->limit_frames);
+			break;
 		default:
 			return SR_ERR_NA;
 		}
@@ -704,7 +707,6 @@ static void send_chunk(struct sr_dev_inst *sdi, unsigned char *buf,
  */
 static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer)
 {
-	struct sr_datafeed_packet packet;
 	struct sr_dev_inst *sdi;
 	struct dev_context *devc;
 	int num_samples, pre;
@@ -782,8 +784,7 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer)
 		devc->framebuf = NULL;
 
 		/* Mark the end of this frame. */
-		packet.type = SR_DF_FRAME_END;
-		sr_session_send(sdi, &packet);
+		std_session_send_df_frame_end(sdi);
 
 		if (devc->limit_frames && ++devc->num_frames >= devc->limit_frames) {
 			/* Terminate session */
@@ -797,7 +798,6 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer)
 static int handle_event(int fd, int revents, void *cb_data)
 {
 	const struct sr_dev_inst *sdi;
-	struct sr_datafeed_packet packet;
 	struct timeval tv;
 	struct sr_dev_driver *di;
 	struct dev_context *devc;
@@ -889,8 +889,7 @@ static int handle_event(int fd, int revents, void *cb_data)
 		devc->dev_state = FETCH_DATA;
 
 		/* Tell the frontend a new frame is on the way. */
-		packet.type = SR_DF_FRAME_BEGIN;
-		sr_session_send(sdi, &packet);
+		std_session_send_df_frame_begin(sdi);
 		break;
 	case CAPTURE_READY_9BIT:
 		/* TODO */

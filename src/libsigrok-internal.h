@@ -17,16 +17,15 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/**
- * @file
- *
- * @internal
- */
-
 #ifndef LIBSIGROK_LIBSIGROK_INTERNAL_H
 #define LIBSIGROK_LIBSIGROK_INTERNAL_H
 
+#include "config.h"
+
 #include <glib.h>
+#ifdef HAVE_LIBHIDAPI
+#include <hidapi.h>
+#endif
 #ifdef HAVE_LIBSERIALPORT
 #include <libserialport.h>
 #endif
@@ -34,7 +33,9 @@
 #include <libusb.h>
 #endif
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 struct zip;
 struct zip_stat;
@@ -55,202 +56,725 @@ struct zip_stat;
 #define ARRAY_AND_SIZE(a) (a), ARRAY_SIZE(a)
 #endif
 
+#ifndef G_SOURCE_FUNC
+#define G_SOURCE_FUNC(f) ((GSourceFunc) (void (*)(void)) (f)) /* Since 2.58. */
+#endif
+
+#define SR_RECEIVE_DATA_CALLBACK(f) \
+	((sr_receive_data_callback) (void (*)(void)) (f))
+
 /**
  * Read a 8 bits unsigned integer out of memory.
  * @param x a pointer to the input memory
  * @return the corresponding unsigned integer
  */
-#define R8(x)     ((unsigned)((const uint8_t*)(x))[0])
+static inline uint8_t read_u8(const uint8_t *p)
+{
+	return p[0];
+}
+#define R8(x)	read_u8((const uint8_t *)(x))
 
 /**
  * Read a 16 bits big endian unsigned integer out of memory.
  * @param x a pointer to the input memory
  * @return the corresponding unsigned integer
  */
-#define RB16(x)  (((unsigned)((const uint8_t*)(x))[0] <<  8) | \
-                   (unsigned)((const uint8_t*)(x))[1])
+static inline uint16_t read_u16be(const uint8_t *p)
+{
+	uint16_t u;
+
+	u = 0;
+	u <<= 8; u |= p[0];
+	u <<= 8; u |= p[1];
+
+	return u;
+}
+#define RB16(x) read_u16be((const uint8_t *)(x))
 
 /**
  * Read a 16 bits little endian unsigned integer out of memory.
  * @param x a pointer to the input memory
  * @return the corresponding unsigned integer
  */
-#define RL16(x)  (((unsigned)((const uint8_t*)(x))[1] <<  8) | \
-                   (unsigned)((const uint8_t*)(x))[0])
+static inline uint16_t read_u16le(const uint8_t *p)
+{
+	uint16_t u;
+
+	u = 0;
+	u <<= 8; u |= p[1];
+	u <<= 8; u |= p[0];
+
+	return u;
+}
+#define RL16(x) read_u16le((const uint8_t *)(x))
 
 /**
  * Read a 16 bits big endian signed integer out of memory.
  * @param x a pointer to the input memory
  * @return the corresponding signed integer
  */
-#define RB16S(x)  ((int16_t) \
-                  (((unsigned)((const uint8_t*)(x))[0] <<  8) | \
-                    (unsigned)((const uint8_t*)(x))[1]))
+static inline int16_t read_i16be(const uint8_t *p)
+{
+	uint16_t u;
+	int16_t i;
+
+	u = read_u16be(p);
+	i = (int16_t)u;
+
+	return i;
+}
+#define RB16S(x) read_i16be((const uint8_t *)(x))
 
 /**
  * Read a 16 bits little endian signed integer out of memory.
  * @param x a pointer to the input memory
  * @return the corresponding signed integer
  */
-#define RL16S(x)  ((int16_t) \
-                  (((unsigned)((const uint8_t*)(x))[1] <<  8) | \
-                    (unsigned)((const uint8_t*)(x))[0]))
+static inline int16_t read_i16le(const uint8_t *p)
+{
+	uint16_t u;
+	int16_t i;
+
+	u = read_u16le(p);
+	i = (int16_t)u;
+
+	return i;
+}
+#define RL16S(x) read_i16le((const uint8_t *)(x))
+
+/**
+ * Read a 24 bits little endian unsigned integer out of memory.
+ * @param x a pointer to the input memory
+ * @return the corresponding unsigned integer
+ */
+static inline uint32_t read_u24le(const uint8_t *p)
+{
+	uint32_t u;
+
+	u = 0;
+	u <<= 8; u |= p[2];
+	u <<= 8; u |= p[1];
+	u <<= 8; u |= p[0];
+
+	return u;
+}
 
 /**
  * Read a 32 bits big endian unsigned integer out of memory.
  * @param x a pointer to the input memory
  * @return the corresponding unsigned integer
  */
-#define RB32(x)  (((unsigned)((const uint8_t*)(x))[0] << 24) | \
-                  ((unsigned)((const uint8_t*)(x))[1] << 16) | \
-                  ((unsigned)((const uint8_t*)(x))[2] <<  8) | \
-                   (unsigned)((const uint8_t*)(x))[3])
+static inline uint32_t read_u32be(const uint8_t *p)
+{
+	uint32_t u;
+
+	u = 0;
+	u <<= 8; u |= p[0];
+	u <<= 8; u |= p[1];
+	u <<= 8; u |= p[2];
+	u <<= 8; u |= p[3];
+
+	return u;
+}
+#define RB32(x) read_u32be((const uint8_t *)(x))
 
 /**
  * Read a 32 bits little endian unsigned integer out of memory.
  * @param x a pointer to the input memory
  * @return the corresponding unsigned integer
  */
-#define RL32(x)  (((unsigned)((const uint8_t*)(x))[3] << 24) | \
-                  ((unsigned)((const uint8_t*)(x))[2] << 16) | \
-                  ((unsigned)((const uint8_t*)(x))[1] <<  8) | \
-                   (unsigned)((const uint8_t*)(x))[0])
+static inline uint32_t read_u32le(const uint8_t *p)
+{
+	uint32_t u;
+
+	u = 0;
+	u <<= 8; u |= p[3];
+	u <<= 8; u |= p[2];
+	u <<= 8; u |= p[1];
+	u <<= 8; u |= p[0];
+
+	return u;
+}
+#define RL32(x) read_u32le((const uint8_t *)(x))
 
 /**
  * Read a 32 bits big endian signed integer out of memory.
  * @param x a pointer to the input memory
  * @return the corresponding signed integer
  */
-#define RB32S(x)  ((int32_t) \
-                 (((unsigned)((const uint8_t*)(x))[0] << 24) | \
-                  ((unsigned)((const uint8_t*)(x))[1] << 16) | \
-                  ((unsigned)((const uint8_t*)(x))[2] <<  8) | \
-                   (unsigned)((const uint8_t*)(x))[3]))
+static inline int32_t read_i32be(const uint8_t *p)
+{
+	uint32_t u;
+	int32_t i;
+
+	u = read_u32be(p);
+	i = (int32_t)u;
+
+	return i;
+}
+#define RB32S(x) read_i32be((const uint8_t *)(x))
 
 /**
  * Read a 32 bits little endian signed integer out of memory.
  * @param x a pointer to the input memory
  * @return the corresponding signed integer
  */
-#define RL32S(x)  ((int32_t) \
-                 (((unsigned)((const uint8_t*)(x))[3] << 24) | \
-                  ((unsigned)((const uint8_t*)(x))[2] << 16) | \
-                  ((unsigned)((const uint8_t*)(x))[1] <<  8) | \
-                   (unsigned)((const uint8_t*)(x))[0]))
+static inline int32_t read_i32le(const uint8_t *p)
+{
+	uint32_t u;
+	int32_t i;
+
+	u = read_u32le(p);
+	i = (int32_t)u;
+
+	return i;
+}
+#define RL32S(x) read_i32le((const uint8_t *)(x))
 
 /**
  * Read a 64 bits big endian unsigned integer out of memory.
  * @param x a pointer to the input memory
  * @return the corresponding unsigned integer
  */
-#define RB64(x)  (((uint64_t)((const uint8_t*)(x))[0] << 56) | \
-                  ((uint64_t)((const uint8_t*)(x))[1] << 48) | \
-                  ((uint64_t)((const uint8_t*)(x))[2] << 40) | \
-                  ((uint64_t)((const uint8_t*)(x))[3] << 32) | \
-                  ((uint64_t)((const uint8_t*)(x))[4] << 24) | \
-                  ((uint64_t)((const uint8_t*)(x))[5] << 16) | \
-                  ((uint64_t)((const uint8_t*)(x))[6] <<  8) | \
-                   (uint64_t)((const uint8_t*)(x))[7])
+static inline uint64_t read_u64be(const uint8_t *p)
+{
+	uint64_t u;
+
+	u = 0;
+	u <<= 8; u |= p[0];
+	u <<= 8; u |= p[1];
+	u <<= 8; u |= p[2];
+	u <<= 8; u |= p[3];
+	u <<= 8; u |= p[4];
+	u <<= 8; u |= p[5];
+	u <<= 8; u |= p[6];
+	u <<= 8; u |= p[7];
+
+	return u;
+}
+#define RB64(x) read_u64be((const uint8_t *)(x))
 
 /**
  * Read a 64 bits little endian unsigned integer out of memory.
  * @param x a pointer to the input memory
  * @return the corresponding unsigned integer
  */
-#define RL64(x)  (((uint64_t)((const uint8_t*)(x))[7] << 56) | \
-                  ((uint64_t)((const uint8_t*)(x))[6] << 48) | \
-                  ((uint64_t)((const uint8_t*)(x))[5] << 40) | \
-                  ((uint64_t)((const uint8_t*)(x))[4] << 32) | \
-                  ((uint64_t)((const uint8_t*)(x))[3] << 24) | \
-                  ((uint64_t)((const uint8_t*)(x))[2] << 16) | \
-                  ((uint64_t)((const uint8_t*)(x))[1] <<  8) | \
-                   (uint64_t)((const uint8_t*)(x))[0])
+static inline uint64_t read_u64le(const uint8_t *p)
+{
+	uint64_t u;
+
+	u = 0;
+	u <<= 8; u |= p[7];
+	u <<= 8; u |= p[6];
+	u <<= 8; u |= p[5];
+	u <<= 8; u |= p[4];
+	u <<= 8; u |= p[3];
+	u <<= 8; u |= p[2];
+	u <<= 8; u |= p[1];
+	u <<= 8; u |= p[0];
+
+	return u;
+}
+#define RL64(x) read_u64le((const uint8_t *)(x))
+
+/**
+ * Read a 64 bits big endian signed integer out of memory.
+ * @param x a pointer to the input memory
+ * @return the corresponding unsigned integer
+ */
+static inline int64_t read_i64be(const uint8_t *p)
+{
+	uint64_t u;
+	int64_t i;
+
+	u = read_u64be(p);
+	i = (int64_t)u;
+
+	return i;
+}
+#define RB64S(x) read_i64be((const uint8_t *)(x))
 
 /**
  * Read a 64 bits little endian signed integer out of memory.
  * @param x a pointer to the input memory
  * @return the corresponding unsigned integer
  */
-#define RL64S(x)  ((int64_t) \
-                 (((uint64_t)((const uint8_t*)(x))[7] << 56) | \
-                  ((uint64_t)((const uint8_t*)(x))[6] << 48) | \
-                  ((uint64_t)((const uint8_t*)(x))[5] << 40) | \
-                  ((uint64_t)((const uint8_t*)(x))[4] << 32) | \
-                  ((uint64_t)((const uint8_t*)(x))[3] << 24) | \
-                  ((uint64_t)((const uint8_t*)(x))[2] << 16) | \
-                  ((uint64_t)((const uint8_t*)(x))[1] <<  8) | \
-                   (uint64_t)((const uint8_t*)(x))[0]))
+static inline int64_t read_i64le(const uint8_t *p)
+{
+	uint64_t u;
+	int64_t i;
+
+	u = read_u64le(p);
+	i = (int64_t)u;
+
+	return i;
+}
+#define RL64S(x) read_i64le((const uint8_t *)(x))
 
 /**
- * Read a 32 bits big endian float out of memory.
+ * Read a 32 bits big endian float out of memory (single precision).
  * @param x a pointer to the input memory
  * @return the corresponding float
  */
-#define RBFL(x)  ((union { uint32_t u; float f; }) { .u = RB32(x) }.f)
+static inline float read_fltbe(const uint8_t *p)
+{
+	/*
+	 * Implementor's note: Strictly speaking the "union" trick
+	 * is not portable. But this phrase was found to work on the
+	 * project's supported platforms, and serve well until a more
+	 * appropriate phrase is found.
+	 */
+	union { uint32_t u32; float flt; } u;
+	float f;
+
+	u.u32 = read_u32be(p);
+	f = u.flt;
+
+	return f;
+}
+#define RBFL(x) read_fltbe((const uint8_t *)(x))
 
 /**
- * Read a 32 bits little endian float out of memory.
+ * Read a 32 bits little endian float out of memory (single precision).
  * @param x a pointer to the input memory
  * @return the corresponding float
  */
-#define RLFL(x)  ((union { uint32_t u; float f; }) { .u = RL32(x) }.f)
+static inline float read_fltle(const uint8_t *p)
+{
+	/*
+	 * Implementor's note: Strictly speaking the "union" trick
+	 * is not portable. But this phrase was found to work on the
+	 * project's supported platforms, and serve well until a more
+	 * appropriate phrase is found.
+	 */
+	union { uint32_t u32; float flt; } u;
+	float f;
+
+	u.u32 = read_u32le(p);
+	f = u.flt;
+
+	return f;
+}
+#define RLFL(x) read_fltle((const uint8_t *)(x))
+
+/**
+ * Read a 64 bits little endian float out of memory (double precision).
+ * @param x a pointer to the input memory
+ * @return the corresponding floating point value
+ */
+static inline double read_dblle(const uint8_t *p)
+{
+	/*
+	 * Implementor's note: Strictly speaking the "union" trick
+	 * is not portable. But this phrase was found to work on the
+	 * project's supported platforms, and serve well until a more
+	 * appropriate phrase is found.
+	 */
+	union { uint64_t u64; double flt; } u;
+	double f;
+
+	u.u64 = read_u64le(p);
+	f = u.flt;
+
+	return f;
+}
+#define RLDB(x) read_dblle((const uint8_t *)(x))
 
 /**
  * Write a 8 bits unsigned integer to memory.
  * @param p a pointer to the output memory
  * @param x the input unsigned integer
  */
-#define W8(p, x)    do { ((uint8_t*)(p))[0] = (uint8_t) (x);      } while (0)
+static inline void write_u8(uint8_t *p, uint8_t x)
+{
+	p[0] = x;
+}
+#define W8(p, x) write_u8((uint8_t *)(p), (uint8_t)(x))
 
 /**
  * Write a 16 bits unsigned integer to memory stored as big endian.
  * @param p a pointer to the output memory
  * @param x the input unsigned integer
  */
-#define WB16(p, x)  do { ((uint8_t*)(p))[1] = (uint8_t) (x);      \
-                         ((uint8_t*)(p))[0] = (uint8_t)((x)>>8);  } while (0)
+static inline void write_u16be(uint8_t *p, uint16_t x)
+{
+	p[1] = x & 0xff; x >>= 8;
+	p[0] = x & 0xff; x >>= 8;
+}
+#define WB16(p, x) write_u16be((uint8_t *)(p), (uint16_t)(x))
 
 /**
  * Write a 16 bits unsigned integer to memory stored as little endian.
  * @param p a pointer to the output memory
  * @param x the input unsigned integer
  */
-#define WL16(p, x)  do { ((uint8_t*)(p))[0] = (uint8_t) (x);      \
-                         ((uint8_t*)(p))[1] = (uint8_t)((x)>>8);  } while (0)
+static inline void write_u16le(uint8_t *p, uint16_t x)
+{
+	p[0] = x & 0xff; x >>= 8;
+	p[1] = x & 0xff; x >>= 8;
+}
+#define WL16(p, x) write_u16le((uint8_t *)(p), (uint16_t)(x))
 
 /**
  * Write a 32 bits unsigned integer to memory stored as big endian.
  * @param p a pointer to the output memory
  * @param x the input unsigned integer
  */
-#define WB32(p, x)  do { ((uint8_t*)(p))[3] = (uint8_t) (x);      \
-                         ((uint8_t*)(p))[2] = (uint8_t)((x)>>8);  \
-                         ((uint8_t*)(p))[1] = (uint8_t)((x)>>16); \
-                         ((uint8_t*)(p))[0] = (uint8_t)((x)>>24); } while (0)
+static inline void write_u32be(uint8_t *p, uint32_t x)
+{
+	p[3] = x & 0xff; x >>= 8;
+	p[2] = x & 0xff; x >>= 8;
+	p[1] = x & 0xff; x >>= 8;
+	p[0] = x & 0xff; x >>= 8;
+}
+#define WB32(p, x) write_u32be((uint8_t *)(p), (uint32_t)(x))
 
 /**
  * Write a 32 bits unsigned integer to memory stored as little endian.
  * @param p a pointer to the output memory
  * @param x the input unsigned integer
  */
-#define WL32(p, x)  do { ((uint8_t*)(p))[0] = (uint8_t) (x);      \
-                         ((uint8_t*)(p))[1] = (uint8_t)((x)>>8);  \
-                         ((uint8_t*)(p))[2] = (uint8_t)((x)>>16); \
-                         ((uint8_t*)(p))[3] = (uint8_t)((x)>>24); } while (0)
+static inline void write_u32le(uint8_t *p, uint32_t x)
+{
+	p[0] = x & 0xff; x >>= 8;
+	p[1] = x & 0xff; x >>= 8;
+	p[2] = x & 0xff; x >>= 8;
+	p[3] = x & 0xff; x >>= 8;
+}
+#define WL32(p, x) write_u32le((uint8_t *)(p), (uint32_t)(x))
+
+/**
+ * Write a 64 bits unsigned integer to memory stored as little endian.
+ * @param p a pointer to the output memory
+ * @param x the input unsigned integer
+ */
+static inline void write_u64le(uint8_t *p, uint64_t x)
+{
+	p[0] = x & 0xff; x >>= 8;
+	p[1] = x & 0xff; x >>= 8;
+	p[2] = x & 0xff; x >>= 8;
+	p[3] = x & 0xff; x >>= 8;
+	p[4] = x & 0xff; x >>= 8;
+	p[5] = x & 0xff; x >>= 8;
+	p[6] = x & 0xff; x >>= 8;
+	p[7] = x & 0xff; x >>= 8;
+}
+#define WL64(p, x) write_u64le((uint8_t *)(p), (uint64_t)(x))
 
 /**
  * Write a 32 bits float to memory stored as big endian.
  * @param p a pointer to the output memory
  * @param x the input float
  */
-#define WBFL(p, x)  WB32(p, (union { uint32_t u; float f; }) { .f = x }.u)
+static inline void write_fltbe(uint8_t *p, float x)
+{
+	union { uint32_t u; float f; } u;
+	u.f = x;
+	write_u32be(p, u.u);
+}
+#define WBFL(p, x) write_fltbe((uint8_t *)(p), (x))
 
 /**
  * Write a 32 bits float to memory stored as little endian.
  * @param p a pointer to the output memory
  * @param x the input float
  */
-#define WLFL(p, x)  WL32(p, (union { uint32_t u; float f; }) { .f = x }.u)
+static inline void write_fltle(uint8_t *p, float x)
+{
+	union { uint32_t u; float f; } u;
+	u.f = x;
+	write_u32le(p, u.u);
+}
+#define WLFL(p, x) write_fltle((uint8_t *)(p), float (x))
+
+/**
+ * Write a 64 bits float to memory stored as little endian.
+ * @param p a pointer to the output memory
+ * @param x the input floating point value
+ */
+static inline void write_dblle(uint8_t *p, double x)
+{
+	union { uint64_t u; double f; } u;
+	u.f = x;
+	write_u64le(p, u.u);
+}
+#define WLDB(p, x) write_dblle((uint8_t *)(p), float (x))
+
+/* Endianess conversion helpers with read/write position increment. */
+
+/**
+ * Read unsigned 8bit integer from raw memory, increment read position.
+ * @param[in, out] p Pointer into byte stream.
+ * @return Retrieved integer value, unsigned.
+ */
+static inline uint8_t read_u8_inc(const uint8_t **p)
+{
+	uint8_t v;
+
+	if (!p || !*p)
+		return 0;
+	v = read_u8(*p);
+	*p += sizeof(v);
+
+	return v;
+}
+
+/**
+ * Read unsigned 16bit integer from raw memory (big endian format), increment read position.
+ * @param[in, out] p Pointer into byte stream.
+ * @return Retrieved integer value, unsigned.
+ */
+static inline uint16_t read_u16be_inc(const uint8_t **p)
+{
+	uint16_t v;
+
+	if (!p || !*p)
+		return 0;
+	v = read_u16be(*p);
+	*p += sizeof(v);
+
+	return v;
+}
+
+/**
+ * Read unsigned 16bit integer from raw memory (little endian format), increment read position.
+ * @param[in, out] p Pointer into byte stream.
+ * @return Retrieved integer value, unsigned.
+ */
+static inline uint16_t read_u16le_inc(const uint8_t **p)
+{
+	uint16_t v;
+
+	if (!p || !*p)
+		return 0;
+	v = read_u16le(*p);
+	*p += sizeof(v);
+
+	return v;
+}
+
+/**
+ * Read unsigned 32bit integer from raw memory (big endian format), increment read position.
+ * @param[in, out] p Pointer into byte stream.
+ * @return Retrieved integer value, unsigned.
+ */
+static inline uint32_t read_u32be_inc(const uint8_t **p)
+{
+	uint32_t v;
+
+	if (!p || !*p)
+		return 0;
+	v = read_u32be(*p);
+	*p += sizeof(v);
+
+	return v;
+}
+
+/**
+ * Read unsigned 24bit integer from raw memory (little endian format), increment read position.
+ * @param[in, out] p Pointer into byte stream.
+ * @return Retrieved integer value, unsigned.
+ */
+static inline uint32_t read_u24le_inc(const uint8_t **p)
+{
+	uint32_t v;
+
+	if (!p || !*p)
+		return 0;
+	v = read_u24le(*p);
+	*p += 3 * sizeof(uint8_t);
+
+	return v;
+}
+
+/**
+ * Read unsigned 32bit integer from raw memory (little endian format), increment read position.
+ * @param[in, out] p Pointer into byte stream.
+ * @return Retrieved integer value, unsigned.
+ */
+static inline uint32_t read_u32le_inc(const uint8_t **p)
+{
+	uint32_t v;
+
+	if (!p || !*p)
+		return 0;
+	v = read_u32le(*p);
+	*p += sizeof(v);
+
+	return v;
+}
+
+/**
+ * Read unsigned 64bit integer from raw memory (big endian format), increment read position.
+ * @param[in, out] p Pointer into byte stream.
+ * @return Retrieved integer value, unsigned.
+ */
+static inline uint64_t read_u64be_inc(const uint8_t **p)
+{
+	uint64_t v;
+
+	if (!p || !*p)
+		return 0;
+	v = read_u64be(*p);
+	*p += sizeof(v);
+
+	return v;
+}
+
+/**
+ * Read unsigned 64bit integer from raw memory (little endian format), increment read position.
+ * @param[in, out] p Pointer into byte stream.
+ * @return Retrieved integer value, unsigned.
+ */
+static inline uint64_t read_u64le_inc(const uint8_t **p)
+{
+	uint64_t v;
+
+	if (!p || !*p)
+		return 0;
+	v = read_u64le(*p);
+	*p += sizeof(v);
+
+	return v;
+}
+
+/**
+ * Read 32bit float from raw memory (little endian format), increment read position.
+ * @param[in, out] p Pointer into byte stream.
+ * @return Retrieved float value.
+ */
+static inline float read_fltle_inc(const uint8_t **p)
+{
+	float v;
+
+	if (!p || !*p)
+		return 0;
+	v = read_fltle(*p);
+	*p += sizeof(v);
+
+	return v;
+}
+
+/**
+ * Read 64bit float from raw memory (little endian format), increment read position.
+ * @param[in, out] p Pointer into byte stream.
+ * @return Retrieved float value.
+ */
+static inline double read_dblle_inc(const uint8_t **p)
+{
+	double v;
+
+	if (!p || !*p)
+		return 0;
+	v = read_dblle(*p);
+	*p += sizeof(v);
+
+	return v;
+}
+
+/**
+ * Write unsigned 8bit integer to raw memory, increment write position.
+ * @param[in, out] p Pointer into byte stream.
+ * @param[in] x Value to write.
+ */
+static inline void write_u8_inc(uint8_t **p, uint8_t x)
+{
+	if (!p || !*p)
+		return;
+	write_u8(*p, x);
+	*p += sizeof(x);
+}
+
+/**
+ * Write unsigned 16bit big endian integer to raw memory, increment write position.
+ * @param[in, out] p Pointer into byte stream.
+ * @param[in] x Value to write.
+ */
+static inline void write_u16be_inc(uint8_t **p, uint16_t x)
+{
+	if (!p || !*p)
+		return;
+	write_u16be(*p, x);
+	*p += sizeof(x);
+}
+
+/**
+ * Write unsigned 16bit little endian integer to raw memory, increment write position.
+ * @param[in, out] p Pointer into byte stream.
+ * @param[in] x Value to write.
+ */
+static inline void write_u16le_inc(uint8_t **p, uint16_t x)
+{
+	if (!p || !*p)
+		return;
+	write_u16le(*p, x);
+	*p += sizeof(x);
+}
+
+/**
+ * Write unsigned 32bit big endian integer to raw memory, increment write position.
+ * @param[in, out] p Pointer into byte stream.
+ * @param[in] x Value to write.
+ */
+static inline void write_u32be_inc(uint8_t **p, uint32_t x)
+{
+	if (!p || !*p)
+		return;
+	write_u32be(*p, x);
+	*p += sizeof(x);
+}
+
+/**
+ * Write unsigned 32bit little endian integer to raw memory, increment write position.
+ * @param[in, out] p Pointer into byte stream.
+ * @param[in] x Value to write.
+ */
+static inline void write_u32le_inc(uint8_t **p, uint32_t x)
+{
+	if (!p || !*p)
+		return;
+	write_u32le(*p, x);
+	*p += sizeof(x);
+}
+
+/**
+ * Write unsigned 64bit little endian integer to raw memory, increment write position.
+ * @param[in, out] p Pointer into byte stream.
+ * @param[in] x Value to write.
+ */
+static inline void write_u64le_inc(uint8_t **p, uint64_t x)
+{
+	if (!p || !*p)
+		return;
+	write_u64le(*p, x);
+	*p += sizeof(x);
+}
+
+/**
+ * Write single precision little endian float to raw memory, increment write position.
+ * @param[in, out] p Pointer into byte stream.
+ * @param[in] x Value to write.
+ */
+static inline void write_fltle_inc(uint8_t **p, float x)
+{
+	if (!p || !*p)
+		return;
+	write_fltle(*p, x);
+	*p += sizeof(x);
+}
+
+/**
+ * Write double precision little endian float to raw memory, increment write position.
+ * @param[in, out] p Pointer into byte stream.
+ * @param[in] x Value to write.
+ */
+static inline void write_dblle_inc(uint8_t **p, double x)
+{
+	if (!p || !*p)
+		return;
+	write_dblle(*p, x);
+	*p += sizeof(x);
+}
 
 /* Portability fixes for FreeBSD. */
 #ifdef __FreeBSD__
@@ -272,7 +796,7 @@ struct zip_stat;
 #ifdef __APPLE__
 #define SR_DRIVER_LIST_SECTION "__DATA,__sr_driver_list"
 #else
-#define SR_DRIVER_LIST_SECTION "sr_driver_list"
+#define SR_DRIVER_LIST_SECTION "__sr_driver_list"
 #endif
 
 /**
@@ -720,14 +1244,67 @@ struct sr_usb_dev_inst {
 };
 #endif
 
-#ifdef HAVE_LIBSERIALPORT
+struct sr_serial_dev_inst;
+#ifdef HAVE_SERIAL_COMM
+struct ser_lib_functions;
+struct ser_hid_chip_functions;
+struct sr_bt_desc;
+typedef void (*serial_rx_chunk_callback)(struct sr_serial_dev_inst *serial,
+	void *cb_data, const void *buf, size_t count);
 struct sr_serial_dev_inst {
 	/** Port name, e.g. '/dev/tty42'. */
 	char *port;
 	/** Comm params for serial_set_paramstr(). */
 	char *serialcomm;
+	struct ser_lib_functions *lib_funcs;
+	struct {
+		int bit_rate;
+		int data_bits;
+		int parity_bits;
+		int stop_bits;
+	} comm_params;
+	GString *rcv_buffer;
+	serial_rx_chunk_callback rx_chunk_cb_func;
+	void *rx_chunk_cb_data;
+#ifdef HAVE_LIBSERIALPORT
 	/** libserialport port handle */
 	struct sp_port *sp_data;
+#endif
+#ifdef HAVE_LIBHIDAPI
+	enum ser_hid_chip_t {
+		SER_HID_CHIP_UNKNOWN,		/**!< place holder */
+		SER_HID_CHIP_BTC_BU86X,		/**!< Brymen BU86x */
+		SER_HID_CHIP_SIL_CP2110,	/**!< SiLabs CP2110 */
+		SER_HID_CHIP_VICTOR_DMM,	/**!< Victor 70/86 DMM cable */
+		SER_HID_CHIP_WCH_CH9325,	/**!< WCH CH9325 */
+		SER_HID_CHIP_LAST,		/**!< sentinel */
+	} hid_chip;
+	struct ser_hid_chip_functions *hid_chip_funcs;
+	char *usb_path;
+	char *usb_serno;
+	const char *hid_path;
+	hid_device *hid_dev;
+	GSList *hid_source_args;
+#endif
+#ifdef HAVE_BLUETOOTH
+	enum ser_bt_conn_t {
+		SER_BT_CONN_UNKNOWN,	/**!< place holder */
+		SER_BT_CONN_RFCOMM,	/**!< BT classic, RFCOMM channel */
+		SER_BT_CONN_BLE122,	/**!< BLE, BLE122 module, indications */
+		SER_BT_CONN_NRF51,	/**!< BLE, Nordic nRF51, notifications */
+		SER_BT_CONN_CC254x,	/**!< BLE, TI CC254x, notifications */
+		SER_BT_CONN_MAX,	/**!< sentinel */
+	} bt_conn_type;
+	char *bt_addr_local;
+	char *bt_addr_remote;
+	size_t bt_rfcomm_channel;
+	uint16_t bt_notify_handle_read;
+	uint16_t bt_notify_handle_write;
+	uint16_t bt_notify_handle_cccd;
+	uint16_t bt_notify_value_cccd;
+	struct sr_bt_desc *bt_desc;
+	GSList *bt_source_args;
+#endif
 };
 #endif
 
@@ -829,7 +1406,31 @@ SR_PRIV struct sr_usb_dev_inst *sr_usb_dev_inst_new(uint8_t bus,
 SR_PRIV void sr_usb_dev_inst_free(struct sr_usb_dev_inst *usb);
 #endif
 
-#ifdef HAVE_LIBSERIALPORT
+#ifdef HAVE_SERIAL_COMM
+#ifndef HAVE_LIBSERIALPORT
+/*
+ * Some identifiers which initially got provided by libserialport are
+ * used internally within the libsigrok serial layer's implementation,
+ * while libserialport no longer is the exclusive provider of serial
+ * communication support. Declare the identifiers here so they remain
+ * available across all build configurations.
+ */
+enum libsp_parity {
+	SP_PARITY_NONE = 0,
+	SP_PARITY_ODD = 1,
+	SP_PARITY_EVEN = 2,
+	SP_PARITY_MARK = 3,
+	SP_PARITY_SPACE = 4,
+};
+
+enum libsp_flowcontrol {
+	SP_FLOWCONTROL_NONE = 0,
+	SP_FLOWCONTROL_XONXOFF = 1,
+	SP_FLOWCONTROL_RTSCTS = 2,
+	SP_FLOWCONTROL_DTRDSR = 3,
+};
+#endif
+
 /* Serial-specific instances */
 SR_PRIV struct sr_serial_dev_inst *sr_serial_dev_inst_new(const char *port,
 		const char *serialcomm);
@@ -946,14 +1547,15 @@ SR_PRIV int std_dummy_dev_open(struct sr_dev_inst *sdi);
 SR_PRIV int std_dummy_dev_close(struct sr_dev_inst *sdi);
 SR_PRIV int std_dummy_dev_acquisition_start(const struct sr_dev_inst *sdi);
 SR_PRIV int std_dummy_dev_acquisition_stop(struct sr_dev_inst *sdi);
-#ifdef HAVE_LIBSERIALPORT
+#ifdef HAVE_SERIAL_COMM
 SR_PRIV int std_serial_dev_open(struct sr_dev_inst *sdi);
 SR_PRIV int std_serial_dev_acquisition_stop(struct sr_dev_inst *sdi);
 #endif
 SR_PRIV int std_session_send_df_header(const struct sr_dev_inst *sdi);
 SR_PRIV int std_session_send_df_end(const struct sr_dev_inst *sdi);
-SR_PRIV int std_session_send_frame_begin(const struct sr_dev_inst *sdi);
-SR_PRIV int std_session_send_frame_end(const struct sr_dev_inst *sdi);
+SR_PRIV int std_session_send_df_trigger(const struct sr_dev_inst *sdi);
+SR_PRIV int std_session_send_df_frame_begin(const struct sr_dev_inst *sdi);
+SR_PRIV int std_session_send_df_frame_end(const struct sr_dev_inst *sdi);
 SR_PRIV int std_dev_clear_with_callback(const struct sr_dev_driver *driver,
 		std_dev_clear_callback clear_private);
 SR_PRIV int std_dev_clear(const struct sr_dev_driver *driver);
@@ -1003,6 +1605,10 @@ SR_PRIV int std_double_tuple_idx_d0(const double d, const double a[][2], unsigne
 
 SR_PRIV int std_cg_idx(const struct sr_channel_group *cg, struct sr_channel_group *a[], unsigned int n);
 
+SR_PRIV int std_dummy_set_params(struct sr_serial_dev_inst *serial,
+	int baudrate, int bits, int parity, int stopbits,
+	int flowcontrol, int rts, int dtr);
+
 /*--- resource.c ------------------------------------------------------------*/
 
 SR_PRIV int64_t sr_file_get_size(FILE *file);
@@ -1022,6 +1628,7 @@ SR_PRIV void *sr_resource_load(struct sr_context *ctx, int type,
 /*--- strutil.c -------------------------------------------------------------*/
 
 SR_PRIV int sr_atol(const char *str, long *ret);
+SR_PRIV int sr_atol_base(const char *str, long *ret, char **end, int base);
 SR_PRIV int sr_atoi(const char *str, int *ret);
 SR_PRIV int sr_atod(const char *str, double *ret);
 SR_PRIV int sr_atof(const char *str, float *ret);
@@ -1056,7 +1663,7 @@ SR_PRIV int soft_trigger_logic_check(struct soft_trigger_logic *st, uint8_t *buf
 
 /*--- serial.c --------------------------------------------------------------*/
 
-#ifdef HAVE_LIBSERIALPORT
+#ifdef HAVE_SERIAL_COMM
 enum {
 	SERIAL_RDWR = 1,
 	SERIAL_RDONLY = 2,
@@ -1064,10 +1671,15 @@ enum {
 
 typedef gboolean (*packet_valid_callback)(const uint8_t *buf);
 
+typedef GSList *(*sr_ser_list_append_t)(GSList *devs, const char *name,
+		const char *desc);
+typedef GSList *(*sr_ser_find_append_t)(GSList *devs, const char *name);
+
 SR_PRIV int serial_open(struct sr_serial_dev_inst *serial, int flags);
 SR_PRIV int serial_close(struct sr_serial_dev_inst *serial);
 SR_PRIV int serial_flush(struct sr_serial_dev_inst *serial);
 SR_PRIV int serial_drain(struct sr_serial_dev_inst *serial);
+SR_PRIV size_t serial_has_receive_data(struct sr_serial_dev_inst *serial);
 SR_PRIV int serial_write_blocking(struct sr_serial_dev_inst *serial,
 		const void *buf, size_t count, unsigned int timeout_ms);
 SR_PRIV int serial_write_nonblocking(struct sr_serial_dev_inst *serial,
@@ -1076,6 +1688,8 @@ SR_PRIV int serial_read_blocking(struct sr_serial_dev_inst *serial, void *buf,
 		size_t count, unsigned int timeout_ms);
 SR_PRIV int serial_read_nonblocking(struct sr_serial_dev_inst *serial, void *buf,
 		size_t count);
+SR_PRIV int serial_set_read_chunk_cb(struct sr_serial_dev_inst *serial,
+		serial_rx_chunk_callback cb, void *cb_data);
 SR_PRIV int serial_set_params(struct sr_serial_dev_inst *serial, int baudrate,
 		int bits, int parity, int stopbits, int flowcontrol, int rts, int dtr);
 SR_PRIV int serial_set_paramstr(struct sr_serial_dev_inst *serial,
@@ -1086,7 +1700,7 @@ SR_PRIV int serial_stream_detect(struct sr_serial_dev_inst *serial,
 				 uint8_t *buf, size_t *buflen,
 				 size_t packet_size,
 				 packet_valid_callback is_valid,
-				 uint64_t timeout_ms, int baudrate);
+				 uint64_t timeout_ms);
 SR_PRIV int sr_serial_extract_options(GSList *options, const char **serial_device,
 				      const char **serial_options);
 SR_PRIV int serial_source_add(struct sr_session *session,
@@ -1096,6 +1710,112 @@ SR_PRIV int serial_source_remove(struct sr_session *session,
 		struct sr_serial_dev_inst *serial);
 SR_PRIV GSList *sr_serial_find_usb(uint16_t vendor_id, uint16_t product_id);
 SR_PRIV int serial_timeout(struct sr_serial_dev_inst *port, int num_bytes);
+
+SR_PRIV void sr_ser_discard_queued_data(struct sr_serial_dev_inst *serial);
+SR_PRIV size_t sr_ser_has_queued_data(struct sr_serial_dev_inst *serial);
+SR_PRIV void sr_ser_queue_rx_data(struct sr_serial_dev_inst *serial,
+		const uint8_t *data, size_t len);
+SR_PRIV size_t sr_ser_unqueue_rx_data(struct sr_serial_dev_inst *serial,
+		uint8_t *data, size_t len);
+
+struct ser_lib_functions {
+	int (*open)(struct sr_serial_dev_inst *serial, int flags);
+	int (*close)(struct sr_serial_dev_inst *serial);
+	int (*flush)(struct sr_serial_dev_inst *serial);
+	int (*drain)(struct sr_serial_dev_inst *serial);
+	int (*write)(struct sr_serial_dev_inst *serial,
+			const void *buf, size_t count,
+			int nonblocking, unsigned int timeout_ms);
+	int (*read)(struct sr_serial_dev_inst *serial,
+			void *buf, size_t count,
+			int nonblocking, unsigned int timeout_ms);
+	int (*set_params)(struct sr_serial_dev_inst *serial,
+			int baudrate, int bits, int parity, int stopbits,
+			int flowcontrol, int rts, int dtr);
+	int (*setup_source_add)(struct sr_session *session,
+			struct sr_serial_dev_inst *serial,
+			int events, int timeout,
+			sr_receive_data_callback cb, void *cb_data);
+	int (*setup_source_remove)(struct sr_session *session,
+			struct sr_serial_dev_inst *serial);
+	GSList *(*list)(GSList *list, sr_ser_list_append_t append);
+	GSList *(*find_usb)(GSList *list, sr_ser_find_append_t append,
+			uint16_t vendor_id, uint16_t product_id);
+	int (*get_frame_format)(struct sr_serial_dev_inst *serial,
+			int *baud, int *bits);
+	size_t (*get_rx_avail)(struct sr_serial_dev_inst *serial);
+};
+extern SR_PRIV struct ser_lib_functions *ser_lib_funcs_libsp;
+SR_PRIV int ser_name_is_hid(struct sr_serial_dev_inst *serial);
+extern SR_PRIV struct ser_lib_functions *ser_lib_funcs_hid;
+SR_PRIV int ser_name_is_bt(struct sr_serial_dev_inst *serial);
+extern SR_PRIV struct ser_lib_functions *ser_lib_funcs_bt;
+
+#ifdef HAVE_LIBHIDAPI
+struct vid_pid_item {
+	uint16_t vid, pid;
+};
+
+struct ser_hid_chip_functions {
+	const char *chipname;
+	const char *chipdesc;
+	const struct vid_pid_item *vid_pid_items;
+	const int max_bytes_per_request;
+	int (*set_params)(struct sr_serial_dev_inst *serial,
+			int baudrate, int bits, int parity, int stopbits,
+			int flowcontrol, int rts, int dtr);
+	int (*read_bytes)(struct sr_serial_dev_inst *serial,
+			uint8_t *data, int space, unsigned int timeout);
+	int (*write_bytes)(struct sr_serial_dev_inst *serial,
+			const uint8_t *data, int space);
+	int (*flush)(struct sr_serial_dev_inst *serial);
+	int (*drain)(struct sr_serial_dev_inst *serial);
+};
+extern SR_PRIV struct ser_hid_chip_functions *ser_hid_chip_funcs_bu86x;
+extern SR_PRIV struct ser_hid_chip_functions *ser_hid_chip_funcs_ch9325;
+extern SR_PRIV struct ser_hid_chip_functions *ser_hid_chip_funcs_cp2110;
+extern SR_PRIV struct ser_hid_chip_functions *ser_hid_chip_funcs_victor;
+SR_PRIV const char *ser_hid_chip_find_name_vid_pid(uint16_t vid, uint16_t pid);
+#endif
+#endif
+
+/*--- bt/ API ---------------------------------------------------------------*/
+
+#ifdef HAVE_BLUETOOTH
+SR_PRIV const char *sr_bt_adapter_get_address(size_t idx);
+
+struct sr_bt_desc;
+typedef void (*sr_bt_scan_cb)(void *cb_data, const char *addr, const char *name);
+typedef int (*sr_bt_data_cb)(void *cb_data, uint8_t *data, size_t dlen);
+
+SR_PRIV struct sr_bt_desc *sr_bt_desc_new(void);
+SR_PRIV void sr_bt_desc_free(struct sr_bt_desc *desc);
+
+SR_PRIV int sr_bt_config_cb_scan(struct sr_bt_desc *desc,
+	sr_bt_scan_cb cb, void *cb_data);
+SR_PRIV int sr_bt_config_cb_data(struct sr_bt_desc *desc,
+	sr_bt_data_cb cb, void *cb_data);
+SR_PRIV int sr_bt_config_addr_local(struct sr_bt_desc *desc, const char *addr);
+SR_PRIV int sr_bt_config_addr_remote(struct sr_bt_desc *desc, const char *addr);
+SR_PRIV int sr_bt_config_rfcomm(struct sr_bt_desc *desc, size_t channel);
+SR_PRIV int sr_bt_config_notify(struct sr_bt_desc *desc,
+	uint16_t read_handle, uint16_t write_handle,
+	uint16_t cccd_handle, uint16_t cccd_value);
+
+SR_PRIV int sr_bt_scan_le(struct sr_bt_desc *desc, int duration);
+SR_PRIV int sr_bt_scan_bt(struct sr_bt_desc *desc, int duration);
+
+SR_PRIV int sr_bt_connect_ble(struct sr_bt_desc *desc);
+SR_PRIV int sr_bt_connect_rfcomm(struct sr_bt_desc *desc);
+SR_PRIV void sr_bt_disconnect(struct sr_bt_desc *desc);
+
+SR_PRIV ssize_t sr_bt_read(struct sr_bt_desc *desc,
+	void *data, size_t len);
+SR_PRIV ssize_t sr_bt_write(struct sr_bt_desc *desc,
+	const void *data, size_t len);
+
+SR_PRIV int sr_bt_start_notify(struct sr_bt_desc *desc);
+SR_PRIV int sr_bt_check_notify(struct sr_bt_desc *desc);
 #endif
 
 /*--- ezusb.c ---------------------------------------------------------------*/
@@ -1122,6 +1842,89 @@ SR_PRIV gboolean usb_match_manuf_prod(libusb_device *dev,
 		const char *manufacturer, const char *product);
 #endif
 
+/*--- binary_helpers.c ------------------------------------------------------*/
+
+/** Binary value type */
+enum binary_value_type {
+	BVT_UINT8 = 0,
+	BVT_BE_UINT8 = BVT_UINT8,
+	BVT_LE_UINT8 = BVT_UINT8,
+
+	BVT_BE_UINT16,
+	BVT_BE_UINT32,
+	BVT_BE_UINT64,
+	BVT_BE_FLOAT,
+
+	BVT_LE_UINT16,
+	BVT_LE_UINT32,
+	BVT_LE_UINT64,
+	BVT_LE_FLOAT,
+};
+
+/** Binary value specification */
+struct binary_value_spec {
+	/** Offset into binary blob */
+	size_t offset;
+	/** Data type to decode */
+	enum binary_value_type type;
+	/** Scale factor to get native units */
+	float scale;
+};
+
+/** Binary channel definition */
+struct binary_analog_channel {
+	/** Channel name */
+	const char *name;
+	/** Binary value in data stream */
+	struct binary_value_spec spec;
+	/** Significant digits */
+	int digits;
+	/** Measured quantity */
+	enum sr_mq mq;
+	/** Measured unit */
+	enum sr_unit unit;
+};
+
+/**
+ * Read extract a value from a binary blob.
+ *
+ * @param out Pointer to output buffer.
+ * @param spec Binary value specification
+ * @param data Pointer to binary blob
+ * @param length Size of binary blob
+ * @return SR_OK on success, SR_ERR_* error code on failure.
+ */
+SR_PRIV int bv_get_value(float *out, const struct binary_value_spec *spec, const void *data, size_t length);
+
+/**
+ * Send an analog channel packet based on a binary analog channel
+ * specification.
+ *
+ * @param sdi Device instance
+ * @param ch Sigrok channel
+ * @param spec Channel specification
+ * @param data Pointer to binary blob
+ * @param length Size of binary blob
+ * @return SR_OK on success, SR_ERR_* error code on failure.
+ */
+SR_PRIV int bv_send_analog_channel(const struct sr_dev_inst *sdi, struct sr_channel *ch,
+				   const struct binary_analog_channel *spec, const void *data, size_t length);
+
+/*--- crc.c -----------------------------------------------------------------*/
+
+#define SR_CRC16_DEFAULT_INIT 0xffffU
+
+/**
+ * Calculate a CRC16 checksum using the 0x8005 polynomial.
+ *
+ * This CRC16 flavor is also known as CRC16-ANSI or CRC16-MODBUS.
+ *
+ * @param crc Initial value (typically 0xffff)
+ * @param buffer Input buffer
+ * @param len Buffer length
+ * @return Checksum
+ */
+SR_PRIV uint16_t sr_crc16(uint16_t crc, const uint8_t *buffer, int len);
 
 /*--- modbus/modbus.c -------------------------------------------------------*/
 
@@ -1340,7 +2143,7 @@ struct metex14_info {
 	gboolean is_hfe, is_unitless, is_logic, is_min, is_max, is_avg;
 };
 
-#ifdef HAVE_LIBSERIALPORT
+#ifdef HAVE_SERIAL_COMM
 SR_PRIV int sr_metex14_packet_request(struct sr_serial_dev_inst *serial);
 #endif
 SR_PRIV gboolean sr_metex14_packet_valid(const uint8_t *buf);
@@ -1371,6 +2174,20 @@ struct bm25x_info { int dummy; };
 SR_PRIV gboolean sr_brymen_bm25x_packet_valid(const uint8_t *buf);
 SR_PRIV int sr_brymen_bm25x_parse(const uint8_t *buf, float *floatval,
 			     struct sr_datafeed_analog *analog, void *info);
+
+/*--- dmm/bm86x.c -----------------------------------------------------------*/
+
+#define BRYMEN_BM86X_PACKET_SIZE 24
+#define BRYMEN_BM86X_DISPLAY_COUNT 2
+
+struct brymen_bm86x_info { size_t ch_idx; };
+
+#ifdef HAVE_SERIAL_COMM
+SR_PRIV int sr_brymen_bm86x_packet_request(struct sr_serial_dev_inst *serial);
+#endif
+SR_PRIV gboolean sr_brymen_bm86x_packet_valid(const uint8_t *buf);
+SR_PRIV int sr_brymen_bm86x_parse(const uint8_t *buf, float *floatval,
+		struct sr_datafeed_analog *analog, void *info);
 
 /*--- dmm/ut71x.c -----------------------------------------------------------*/
 
@@ -1425,21 +2242,53 @@ SR_PRIV int sr_vc96_parse(const uint8_t *buf, float *floatval,
 
 /*--- lcr/es51919.c ---------------------------------------------------------*/
 
-SR_PRIV void es51919_serial_clean(void *priv);
-SR_PRIV struct sr_dev_inst *es51919_serial_scan(GSList *options,
-						const char *vendor,
-						const char *model);
-SR_PRIV int es51919_serial_config_get(uint32_t key, GVariant **data,
-				      const struct sr_dev_inst *sdi,
-				      const struct sr_channel_group *cg);
-SR_PRIV int es51919_serial_config_set(uint32_t key, GVariant *data,
-				      const struct sr_dev_inst *sdi,
-				      const struct sr_channel_group *cg);
-SR_PRIV int es51919_serial_config_list(uint32_t key, GVariant **data,
-				       const struct sr_dev_inst *sdi,
-				       const struct sr_channel_group *cg);
-SR_PRIV int es51919_serial_acquisition_start(const struct sr_dev_inst *sdi);
-SR_PRIV int es51919_serial_acquisition_stop(struct sr_dev_inst *sdi);
+/* Acquisition details which apply to all supported serial-lcr devices. */
+struct lcr_parse_info {
+	size_t ch_idx;
+	uint64_t output_freq;
+	const char *circuit_model;
+};
+
+#define ES51919_PACKET_SIZE	17
+#define ES51919_CHANNEL_COUNT	2
+#define ES51919_COMM_PARAM	"9600/8n1/rts=1/dtr=1"
+
+SR_PRIV int es51919_config_get(uint32_t key, GVariant **data,
+	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg);
+SR_PRIV int es51919_config_set(uint32_t key, GVariant *data,
+	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg);
+SR_PRIV int es51919_config_list(uint32_t key, GVariant **data,
+	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg);
+SR_PRIV gboolean es51919_packet_valid(const uint8_t *pkt);
+SR_PRIV int es51919_packet_parse(const uint8_t *pkt, float *floatval,
+	struct sr_datafeed_analog *analog, void *info);
+
+/*--- lcr/vc4080.c ----------------------------------------------------------*/
+
+/* Note: Also uses 'struct lcr_parse_info' from es51919 above. */
+
+#define VC4080_PACKET_SIZE	39
+#define VC4080_COMM_PARAM	"1200/8n1"
+#define VC4080_WITH_DQ_CHANS	0 /* Enable separate D/Q channels? */
+
+enum vc4080_display {
+	VC4080_DISPLAY_PRIMARY,
+	VC4080_DISPLAY_SECONDARY,
+#if VC4080_WITH_DQ_CHANS
+	VC4080_DISPLAY_D_VALUE,
+	VC4080_DISPLAY_Q_VALUE,
+#endif
+	VC4080_CHANNEL_COUNT,
+};
+
+extern SR_PRIV const char *vc4080_channel_formats[VC4080_CHANNEL_COUNT];
+
+SR_PRIV int vc4080_config_list(uint32_t key, GVariant **data,
+	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg);
+SR_PRIV int vc4080_packet_request(struct sr_serial_dev_inst *serial);
+SR_PRIV gboolean vc4080_packet_valid(const uint8_t *pkt);
+SR_PRIV int vc4080_packet_parse(const uint8_t *pkt, float *floatval,
+	struct sr_datafeed_analog *analog, void *info);
 
 /*--- dmm/ut372.c -----------------------------------------------------------*/
 
@@ -1471,7 +2320,7 @@ struct asycii_info {
 	gboolean is_invalid;
 };
 
-#ifdef HAVE_LIBSERIALPORT
+#ifdef HAVE_SERIAL_COMM
 SR_PRIV int sr_asycii_packet_request(struct sr_serial_dev_inst *serial);
 #endif
 SR_PRIV gboolean sr_asycii_packet_valid(const uint8_t *buf);
@@ -1516,10 +2365,8 @@ struct eev121gw_info {
 
 extern SR_PRIV const char *eev121gw_channel_formats[];
 SR_PRIV gboolean sr_eev121gw_packet_valid(const uint8_t *buf);
-SR_PRIV int sr_eev121gw_parse(const uint8_t *buf, float *floatval,
-			     struct sr_datafeed_analog *analog, void *info);
 SR_PRIV int sr_eev121gw_3displays_parse(const uint8_t *buf, float *floatval,
-			     struct sr_datafeed_analog *analog, void *info);
+		struct sr_datafeed_analog *analog, void *info);
 
 /*--- scale/kern.c ----------------------------------------------------------*/
 
@@ -1538,12 +2385,14 @@ SR_PRIV int sr_kern_parse(const uint8_t *buf, float *floatval,
 
 struct sr_sw_limits {
 	uint64_t limit_samples;
+	uint64_t limit_frames;
 	uint64_t limit_msec;
 	uint64_t samples_read;
+	uint64_t frames_read;
 	uint64_t start_time;
 };
 
-SR_PRIV int sr_sw_limits_config_get(struct sr_sw_limits *limits, uint32_t key,
+SR_PRIV int sr_sw_limits_config_get(const struct sr_sw_limits *limits, uint32_t key,
 	GVariant **data);
 SR_PRIV int sr_sw_limits_config_set(struct sr_sw_limits *limits, uint32_t key,
 	GVariant *data);
@@ -1551,6 +2400,29 @@ SR_PRIV void sr_sw_limits_acquisition_start(struct sr_sw_limits *limits);
 SR_PRIV gboolean sr_sw_limits_check(struct sr_sw_limits *limits);
 SR_PRIV void sr_sw_limits_update_samples_read(struct sr_sw_limits *limits,
 	uint64_t samples_read);
+SR_PRIV void sr_sw_limits_update_frames_read(struct sr_sw_limits *limits,
+	uint64_t frames_read);
 SR_PRIV void sr_sw_limits_init(struct sr_sw_limits *limits);
+
+/*--- feed_queue.h ----------------------------------------------------------*/
+
+struct feed_queue_logic;
+struct feed_queue_analog;
+
+SR_API struct feed_queue_logic *feed_queue_logic_alloc(
+	struct sr_dev_inst *sdi,
+	size_t sample_count, size_t unit_size);
+SR_API int feed_queue_logic_submit(struct feed_queue_logic *q,
+	const uint8_t *data, size_t count);
+SR_API int feed_queue_logic_flush(struct feed_queue_logic *q);
+SR_API void feed_queue_logic_free(struct feed_queue_logic *q);
+
+SR_API struct feed_queue_analog *feed_queue_analog_alloc(
+	struct sr_dev_inst *sdi,
+	size_t sample_count, int digits, struct sr_channel *ch);
+SR_API int feed_queue_analog_submit(struct feed_queue_analog *q,
+	float data, size_t count);
+SR_API int feed_queue_analog_flush(struct feed_queue_analog *q);
+SR_API void feed_queue_analog_free(struct feed_queue_analog *q);
 
 #endif

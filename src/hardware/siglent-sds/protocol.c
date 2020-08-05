@@ -348,7 +348,7 @@ static int siglent_sds_get_digital(const struct sr_dev_inst *sdi, struct sr_chan
 	gboolean low_channels; /* Lower channels enabled */
 	gboolean high_channels; /* Higher channels enabled */
 	int len, channel_index;
-	long samples_index;
+	uint64_t samples_index;
 
 	len = 0;
 	channel_index = 0;
@@ -414,7 +414,7 @@ static int siglent_sds_get_digital(const struct sr_dev_inst *sdi, struct sr_chan
 				}
 
 				/* Storing the converted temp values from the the scope into the buffers. */
-				for (long index = 0; index < tmp_samplebuf->len; index++) {
+				for (uint64_t index = 0; index < tmp_samplebuf->len; index++) {
 					uint8_t value = g_array_index(tmp_samplebuf, uint8_t, index);
 					if (ch->index < 8)
 						g_array_append_val(data_low_channels, value);
@@ -539,8 +539,7 @@ SR_PRIV int siglent_sds_receive(int fd, int revents, void *cb_data)
 				return TRUE;
 			if (len == -1) {
 				sr_err("Read error, aborting capture.");
-				packet.type = SR_DF_FRAME_END;
-				sr_session_send(sdi, &packet);
+				std_session_send_df_frame_end(sdi);
 				sdi->driver->dev_acquisition_stop(sdi);
 				return TRUE;
 			}
@@ -549,8 +548,7 @@ SR_PRIV int siglent_sds_receive(int fd, int revents, void *cb_data)
 
 			if (len == -1) {
 				sr_err("Read error, aborting capture.");
-				packet.type = SR_DF_FRAME_END;
-				sr_session_send(sdi, &packet);
+				std_session_send_df_frame_end(sdi);
 				sdi->driver->dev_acquisition_stop(sdi);
 				return TRUE;
 			}
@@ -563,12 +561,11 @@ SR_PRIV int siglent_sds_receive(int fd, int revents, void *cb_data)
 					devc->buffer += devc->block_header_size;
 					len = devc->num_samples;
 				} else {
-					sr_dbg("Requesting: %li bytes.", devc->num_samples - devc->num_block_bytes);
+					sr_dbg("Requesting: %" PRIu64 " bytes.", devc->num_samples - devc->num_block_bytes);
 					len = sr_scpi_read_data(scpi, (char *)devc->buffer, devc->num_samples-devc->num_block_bytes);
 					if (len == -1) {
 						sr_err("Read error, aborting capture.");
-						packet.type = SR_DF_FRAME_END;
-						sr_session_send(sdi, &packet);
+						std_session_send_df_frame_end(sdi);
 						sdi->driver->dev_acquisition_stop(sdi);
 						return TRUE;
 					}
@@ -615,8 +612,7 @@ SR_PRIV int siglent_sds_receive(int fd, int revents, void *cb_data)
 					read_complete = TRUE;
 					if (!sr_scpi_read_complete(scpi)) {
 						sr_err("Read should have been completed.");
-						packet.type = SR_DF_FRAME_END;
-						sr_session_send(sdi, &packet);
+						std_session_send_df_frame_end(sdi);
 						sdi->driver->dev_acquisition_stop(sdi);
 						return TRUE;
 					}
@@ -633,8 +629,7 @@ SR_PRIV int siglent_sds_receive(int fd, int revents, void *cb_data)
 				siglent_sds_channel_start(sdi);
 			} else {
 				/* Done with this frame. */
-				packet.type = SR_DF_FRAME_END;
-				sr_session_send(sdi, &packet);
+				std_session_send_df_frame_end(sdi);
 				if (++devc->num_frames == devc->limit_frames) {
 					/* Last frame, stop capture. */
 					sdi->driver->dev_acquisition_stop(sdi);
@@ -644,8 +639,7 @@ SR_PRIV int siglent_sds_receive(int fd, int revents, void *cb_data)
 					siglent_sds_capture_start(sdi);
 
 					/* Start of next frame. */
-					packet.type = SR_DF_FRAME_BEGIN;
-					sr_session_send(sdi, &packet);
+					std_session_send_df_frame_begin(sdi);
 				}
 			}
 		}
@@ -658,8 +652,7 @@ SR_PRIV int siglent_sds_receive(int fd, int revents, void *cb_data)
 		packet.type = SR_DF_LOGIC;
 		packet.payload = &logic;
 		sr_session_send(sdi, &packet);
-		packet.type = SR_DF_FRAME_END;
-		sr_session_send(sdi, &packet);
+		std_session_send_df_frame_end(sdi);
 		sdi->driver->dev_acquisition_stop(sdi);
 
 		if (++devc->num_frames == devc->limit_frames) {
@@ -671,14 +664,12 @@ SR_PRIV int siglent_sds_receive(int fd, int revents, void *cb_data)
 			siglent_sds_capture_start(sdi);
 
 			/* Start of next frame. */
-			packet.type = SR_DF_FRAME_BEGIN;
-			sr_session_send(sdi, &packet);
+			std_session_send_df_frame_begin(sdi);
 		}
 	}
 
 	// sr_session_send(sdi, &packet);
-	// packet.type = SR_DF_FRAME_END;
-	// sr_session_send(sdi, &packet);
+	// std_session_send_df_frame_end(sdi);
 	// sdi->driver->dev_acquisition_stop(sdi);
 
 	return TRUE;
@@ -939,7 +930,7 @@ SR_PRIV int siglent_sds_get_dev_cfg_horizontal(const struct sr_dev_inst *sdi)
 	sr_dbg("Current timebase: %g.", devc->timebase);
 	devc->samplerate = devc->memory_depth_analog / (devc->timebase * devc->model->series->num_horizontal_divs);
 	sr_dbg("Current samplerate: %0f.", devc->samplerate);
-	sr_dbg("Current memory depth: %lu.", devc->memory_depth_analog);
+	sr_dbg("Current memory depth: %" PRIu64 ".", devc->memory_depth_analog);
 
 	return SR_OK;
 }

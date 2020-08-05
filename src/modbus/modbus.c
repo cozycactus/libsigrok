@@ -28,7 +28,7 @@
 SR_PRIV extern const struct sr_modbus_dev_inst modbus_serial_rtu_dev;
 
 static const struct sr_modbus_dev_inst *modbus_devs[] = {
-#ifdef HAVE_LIBSERIALPORT
+#ifdef HAVE_SERIAL_COMM
 	&modbus_serial_rtu_dev, /* Must be last as it matches any resource. */
 #endif
 };
@@ -51,13 +51,14 @@ static struct sr_dev_inst *sr_modbus_scan_resource(const char *resource,
 		return NULL;
 	};
 
-	if ((sdi = probe_device(modbus)))
-		return sdi;
+	sdi = probe_device(modbus);
 
 	sr_modbus_close(modbus);
-	sr_modbus_free(modbus);
 
-	return NULL;
+	if (!sdi)
+		sr_modbus_free(modbus);
+
+	return sdi;
 }
 
 /**

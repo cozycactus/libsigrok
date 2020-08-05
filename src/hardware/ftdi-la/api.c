@@ -57,6 +57,28 @@ static const struct ftdi_chip_desc ft2232h_desc = {
 	}
 };
 
+static const struct ftdi_chip_desc ft2232h_tumpa_desc = {
+	.vendor = 0x0403,
+	.product = 0x8a98,
+	.samplerate_div = 20,
+	/* 20 pin JTAG header */
+	.channel_names = {
+		"TCK", "TDI", "TDO", "TMS", "RST", "nTRST", "DBGRQ", "RTCK",
+		NULL
+	}
+};
+
+static const struct ftdi_chip_desc ft4232h_desc = {
+	.vendor = 0x0403,
+	.product = 0x6011,
+	.samplerate_div = 20,
+	.channel_names = {
+		"ADBUS0", "ADBUS1", "ADBUS2", "ADBUS3",	"ADBUS4", "ADBUS5", "ADBUS6", "ADBUS7",
+		/* TODO: BDBUS[0..7], CDBUS[0..7], DDBUS[0..7] channels. */
+		NULL
+	}
+};
+
 static const struct ftdi_chip_desc ft232r_desc = {
 	.vendor = 0x0403,
 	.product = 0x6001,
@@ -79,8 +101,11 @@ static const struct ftdi_chip_desc ft232h_desc = {
 
 static const struct ftdi_chip_desc *chip_descs[] = {
 	&ft2232h_desc,
+	&ft2232h_tumpa_desc,
+	&ft4232h_desc,
 	&ft232r_desc,
 	&ft232h_desc,
+	NULL,
 };
 
 static void scan_device(struct ftdi_context *ftdic,
@@ -98,13 +123,15 @@ static void scan_device(struct ftdi_context *ftdic,
 	desc = NULL;
 	for (unsigned long i = 0; i < ARRAY_SIZE(chip_descs); i++) {
 		desc = chip_descs[i];
+		if (!desc)
+			break;
 		if (desc->vendor == usb_desc.idVendor &&
 			desc->product == usb_desc.idProduct)
 			break;
 	}
 
 	if (!desc) {
-		sr_spew("Unsupported FTDI device 0x%4x:0x%4x.",
+		sr_spew("Unsupported FTDI device 0x%04x:0x%04x.",
 			usb_desc.idVendor, usb_desc.idProduct);
 		return;
 	}

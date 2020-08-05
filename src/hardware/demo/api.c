@@ -32,7 +32,7 @@
 #define DEFAULT_NUM_LOGIC_CHANNELS		8
 #define DEFAULT_LOGIC_PATTERN			PATTERN_SIGROK
 
-#define DEFAULT_NUM_ANALOG_CHANNELS		4
+#define DEFAULT_NUM_ANALOG_CHANNELS		5
 
 /* Note: No spaces allowed because of sigrok-cli. */
 static const char *logic_pattern_str[] = {
@@ -224,6 +224,8 @@ static void clear_helper(struct dev_context *devc)
 {
 	GHashTableIter iter;
 	void *value;
+
+	demo_free_analog_pattern(devc);
 
 	/* Analog generators. */
 	g_hash_table_iter_init(&iter, devc->ch_ag);
@@ -571,7 +573,7 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 	std_session_send_df_header(sdi);
 
 	if (devc->limit_frames > 0)
-		std_session_send_frame_begin(sdi);
+		std_session_send_df_frame_begin(sdi);
 
 	/* We use this timestamp to decide how many more samples to send. */
 	devc->start_us = g_get_monotonic_time();
@@ -589,7 +591,7 @@ static int dev_acquisition_stop(struct sr_dev_inst *sdi)
 
 	devc = sdi->priv;
 	if (devc->limit_frames > 0)
-		std_session_send_frame_end(sdi);
+		std_session_send_df_frame_end(sdi);
 
 	std_session_send_df_end(sdi);
 

@@ -42,7 +42,7 @@ static const uint32_t drvopts[] = {
 };
 
 static const uint32_t devopts[] = {
-	SR_CONF_LIMIT_FRAMES | SR_CONF_SET,
+	SR_CONF_LIMIT_FRAMES | SR_CONF_GET | SR_CONF_SET,
 	SR_CONF_SAMPLERATE | SR_CONF_GET,
 	SR_CONF_TIMEBASE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
 	SR_CONF_NUM_HDIV | SR_CONF_GET,
@@ -180,8 +180,10 @@ enum series {
 	DS2000,
 	DS2000A,
 	DSO1000,
+	DSO1000B,
 	DS1000Z,
 	DS4000,
+	MSO5000,
 	MSO7000A,
 };
 
@@ -205,10 +207,14 @@ static const struct rigol_ds_series supported_series[] = {
 		{1000, 1}, {500, 1000000}, 14, 1400, 14000},
 	[DSO1000] = {VENDOR(AGILENT), "DSO1000", PROTOCOL_V3, FORMAT_IEEE488_2,
 		{50, 1}, {2, 1000}, 12, 600, 20480},
+	[DSO1000B] = {VENDOR(AGILENT), "DSO1000", PROTOCOL_V3, FORMAT_IEEE488_2,
+		{50, 1}, {2, 1000}, 12, 600, 20480},
 	[DS1000Z] = {VENDOR(RIGOL), "DS1000Z", PROTOCOL_V4, FORMAT_IEEE488_2,
 		{50, 1}, {1, 1000}, 12, 1200, 12000000},
 	[DS4000] = {VENDOR(RIGOL), "DS4000", PROTOCOL_V4, FORMAT_IEEE488_2,
 		{1000, 1}, {1, 1000}, 14, 1400, 0},
+	[MSO5000] = {VENDOR(RIGOL), "MSO5000", PROTOCOL_V5, FORMAT_IEEE488_2,
+		{1000, 1}, {500, 1000000}, 10, 1000, 0},
 	[MSO7000A] = {VENDOR(AGILENT), "MSO7000A", PROTOCOL_V4, FORMAT_IEEE488_2,
 		{50, 1}, {2, 1000}, 10, 1000, 8000000},
 };
@@ -236,6 +242,7 @@ static const struct rigol_ds_model supported_models[] = {
 	{SERIES(DS1000), "DS1052E", {5, 1000000000}, CH_INFO(2, false), std_cmd},
 	{SERIES(DS1000), "DS1102E", {2, 1000000000}, CH_INFO(2, false), std_cmd},
 	{SERIES(DS1000), "DS1152E", {2, 1000000000}, CH_INFO(2, false), std_cmd},
+	{SERIES(DS1000), "DS1152E-EDU", {2, 1000000000}, CH_INFO(2, false), std_cmd},
 	{SERIES(DS1000), "DS1052D", {5, 1000000000}, CH_INFO(2, true), std_cmd},
 	{SERIES(DS1000), "DS1102D", {2, 1000000000}, CH_INFO(2, true), std_cmd},
 	{SERIES(DS1000), "DS1152D", {2, 1000000000}, CH_INFO(2, true), std_cmd},
@@ -257,6 +264,10 @@ static const struct rigol_ds_model supported_models[] = {
 	{SERIES(DSO1000), "DSO1014A", {2, 1000000000}, CH_INFO(4, false), std_cmd},
 	{SERIES(DSO1000), "DSO1022A", {2, 1000000000}, CH_INFO(2, false), std_cmd},
 	{SERIES(DSO1000), "DSO1024A", {2, 1000000000}, CH_INFO(4, false), std_cmd},
+	{SERIES(DSO1000B), "DSO1052B", {2, 1000000000}, CH_INFO(2, false), std_cmd},
+	{SERIES(DSO1000B), "DSO1072B", {2, 1000000000}, CH_INFO(2, false), std_cmd},
+	{SERIES(DSO1000B), "DSO1102B", {2, 1000000000}, CH_INFO(2, false), std_cmd},
+	{SERIES(DSO1000B), "DSO1152B", {2, 1000000000}, CH_INFO(2, false), std_cmd},
 	{SERIES(DS1000Z), "DS1054Z", {5, 1000000000}, CH_INFO(4, false), std_cmd},
 	{SERIES(DS1000Z), "DS1074Z", {5, 1000000000}, CH_INFO(4, false), std_cmd},
 	{SERIES(DS1000Z), "DS1104Z", {5, 1000000000}, CH_INFO(4, false), std_cmd},
@@ -264,16 +275,25 @@ static const struct rigol_ds_model supported_models[] = {
 	{SERIES(DS1000Z), "DS1104Z-S", {5, 1000000000}, CH_INFO(4, false), std_cmd},
 	{SERIES(DS1000Z), "DS1074Z Plus", {5, 1000000000}, CH_INFO(4, false), std_cmd},
 	{SERIES(DS1000Z), "DS1104Z Plus", {5, 1000000000}, CH_INFO(4, false), std_cmd},
+	{SERIES(DS1000Z), "DS1202Z-E", {2, 1000000000}, CH_INFO(2, false), std_cmd},
 	{SERIES(DS1000Z), "MSO1074Z", {5, 1000000000}, CH_INFO(4, true), std_cmd},
 	{SERIES(DS1000Z), "MSO1104Z", {5, 1000000000}, CH_INFO(4, true), std_cmd},
 	{SERIES(DS1000Z), "MSO1074Z-S", {5, 1000000000}, CH_INFO(4, true), std_cmd},
 	{SERIES(DS1000Z), "MSO1104Z-S", {5, 1000000000}, CH_INFO(4, true), std_cmd},
 	{SERIES(DS4000), "DS4024", {1, 1000000000}, CH_INFO(4, false), std_cmd},
+	{SERIES(MSO5000), "MSO5072", {1, 1000000000}, CH_INFO(2, true), std_cmd},
+	{SERIES(MSO5000), "MSO5074", {1, 1000000000}, CH_INFO(4, true), std_cmd},
+	{SERIES(MSO5000), "MSO5102", {1, 1000000000}, CH_INFO(2, true), std_cmd},
+	{SERIES(MSO5000), "MSO5104", {1, 1000000000}, CH_INFO(4, true), std_cmd},
+	{SERIES(MSO5000), "MSO5204", {1, 1000000000}, CH_INFO(4, true), std_cmd},
+	{SERIES(MSO5000), "MSO5354", {1, 1000000000}, CH_INFO(4, true), std_cmd},
 	/* TODO: Digital channels are not yet supported on MSO7000A. */
 	{SERIES(MSO7000A), "MSO7034A", {2, 1000000000}, CH_INFO(4, false), mso7000a_cmd},
 };
 
 static struct sr_dev_driver rigol_ds_driver_info;
+
+static int analog_frame_size(const struct sr_dev_inst *);
 
 static void clear_helper(struct dev_context *devc)
 {
@@ -482,6 +502,7 @@ static int analog_frame_size(const struct sr_dev_inst *sdi)
 	case DATA_SOURCE_LIVE:
 		return devc->model->series->live_samples;
 	case DATA_SOURCE_MEMORY:
+	case DATA_SOURCE_SEGMENTED:
 		return devc->model->series->buffer_samples / analog_channels;
 	default:
 		return 0;
@@ -496,6 +517,7 @@ static int digital_frame_size(const struct sr_dev_inst *sdi)
 	case DATA_SOURCE_LIVE:
 		return devc->model->series->live_samples * 2;
 	case DATA_SOURCE_MEMORY:
+	case DATA_SOURCE_SEGMENTED:
 		return devc->model->series->buffer_samples * 2;
 	default:
 		return 0;
@@ -508,7 +530,6 @@ static int config_get(uint32_t key, GVariant **data,
 	struct dev_context *devc;
 	struct sr_channel *ch;
 	const char *tmp_str;
-	uint64_t samplerate;
 	int analog_channel = -1;
 	float smallest_diff = INFINITY;
 	int idx = -1;
@@ -551,15 +572,11 @@ static int config_get(uint32_t key, GVariant **data,
 		else
 			*data = g_variant_new_string("Segmented");
 		break;
+	case SR_CONF_LIMIT_FRAMES:
+		*data = g_variant_new_uint64(devc->limit_frames);
+		break;
 	case SR_CONF_SAMPLERATE:
-		if (devc->data_source == DATA_SOURCE_LIVE) {
-			samplerate = analog_frame_size(sdi) /
-				(devc->timebase * devc->model->series->num_horizontal_divs);
-			*data = g_variant_new_uint64(samplerate);
-		} else {
-			sr_dbg("Unknown data source: %d.", devc->data_source);
-			return SR_ERR_NA;
-		}
+		*data = g_variant_new_uint64(devc->sample_rate);
 		break;
 	case SR_CONF_TRIGGER_SOURCE:
 		if (!strcmp(devc->trigger_source, "ACL"))
@@ -861,14 +878,17 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 	struct sr_scpi_dev_inst *scpi;
 	struct dev_context *devc;
 	struct sr_channel *ch;
-	struct sr_datafeed_packet packet;
 	gboolean some_digital;
 	GSList *l;
+	char *cmd;
+	int protocol;
 
 	scpi = sdi->conn;
 	devc = sdi->priv;
+	protocol = devc->model->series->protocol;
 
 	devc->num_frames = 0;
+	devc->num_frames_segmented = 0;
 
 	some_digital = FALSE;
 	for (l = sdi->channels; l; l = l->next) {
@@ -889,7 +909,7 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 			/* Only one list entry for older protocols. All channels are
 			 * retrieved together when this entry is processed. */
 			if (ch->enabled && (
-						devc->model->series->protocol > PROTOCOL_V3 ||
+						protocol > PROTOCOL_V3 ||
 						!some_digital))
 				devc->enabled_channels = g_slist_append(
 						devc->enabled_channels, ch);
@@ -897,8 +917,7 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 				some_digital = TRUE;
 				/* Turn on LA module if currently off. */
 				if (!devc->la_enabled) {
-					if (rigol_ds_config_set(sdi,
-							devc->model->series->protocol >= PROTOCOL_V3 ?
+					if (rigol_ds_config_set(sdi, protocol >= PROTOCOL_V3 ?
 								":LA:STAT ON" : ":LA:DISP ON") != SR_OK)
 						return SR_ERR;
 					devc->la_enabled = TRUE;
@@ -906,9 +925,14 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 			}
 			if (ch->enabled != devc->digital_channels[ch->index]) {
 				/* Enabled channel is currently disabled, or vice versa. */
-				if (rigol_ds_config_set(sdi,
-						devc->model->series->protocol >= PROTOCOL_V3 ?
-							":LA:DIG%d:DISP %s" : ":DIG%d:TURN %s", ch->index,
+				if (protocol >= PROTOCOL_V5)
+					cmd = ":LA:DISP D%d,%s";
+				else if (protocol >= PROTOCOL_V3)
+					cmd = ":LA:DIG%d:DISP %s";
+				else
+					cmd = ":DIG%d:TURN %s";
+
+				if (rigol_ds_config_set(sdi, cmd, ch->index,
 						ch->enabled ? "ON" : "OFF") != SR_OK)
 					return SR_ERR;
 				devc->digital_channels[ch->index] = ch->enabled;
@@ -928,8 +952,37 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 
 	/* Set memory mode. */
 	if (devc->data_source == DATA_SOURCE_SEGMENTED) {
-		sr_err("Data source 'Segmented' not yet supported");
-		return SR_ERR;
+		switch (protocol) {
+		case PROTOCOL_V1:
+		case PROTOCOL_V2:
+			/* V1 and V2 do not have segmented data */
+			sr_err("Data source 'Segmented' not supported on this model");
+			break;
+		case PROTOCOL_V3:
+		case PROTOCOL_V4:
+		{
+			int frames = 0;
+			if (sr_scpi_get_int(sdi->conn,
+						protocol == PROTOCOL_V4 ? "FUNC:WREP:FEND?" :
+						"FUNC:WREP:FMAX?", &frames) != SR_OK)
+				return SR_ERR;
+			if (frames <= 0) {
+				sr_err("No segmented data available");
+				return SR_ERR;
+			}
+			devc->num_frames_segmented = frames;
+			break;
+		}
+		case PROTOCOL_V5:
+			/* The frame limit has to be read on the fly, just set up
+			 * reading of the first frame */
+			if (rigol_ds_config_set(sdi, "REC:CURR 1") != SR_OK)
+				return SR_ERR;
+			break;
+		default:
+			sr_err("Data source 'Segmented' not yet supported");
+			return SR_ERR;
+		}
 	}
 
 	devc->analog_frame_size = analog_frame_size(sdi);
@@ -967,12 +1020,25 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 
 	devc->channel_entry = devc->enabled_channels;
 
+	if (devc->data_source == DATA_SOURCE_LIVE)
+		devc->sample_rate = analog_frame_size(sdi) / 
+			(devc->timebase * devc->model->series->num_horizontal_divs);
+	else {
+		float xinc;
+		if (devc->model->series->protocol >= PROTOCOL_V3 && 
+				sr_scpi_get_float(sdi->conn, "WAV:XINC?", &xinc) != SR_OK) {
+			sr_err("Couldn't get sampling rate");
+			return SR_ERR;
+		}
+		devc->sample_rate = 1. / xinc;
+	}
+
+
 	if (rigol_ds_capture_start(sdi) != SR_OK)
 		return SR_ERR;
 
 	/* Start of first frame. */
-	packet.type = SR_DF_FRAME_BEGIN;
-	sr_session_send(sdi, &packet);
+	std_session_send_df_frame_begin(sdi);
 
 	return SR_OK;
 }

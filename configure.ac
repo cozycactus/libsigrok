@@ -96,10 +96,18 @@ SR_PKGLIBS_RUBY=
 SR_EXTRA_LIBS=
 SR_EXTRA_CXX_LIBS=
 
-SR_ARG_OPT_PKG([libserialport], [LIBSERIALPORT], [NEED_SERIAL],
+SR_ARG_OPT_PKG([libserialport], [LIBSERIALPORT], ,
 	[libserialport >= 0.1.1])
 
 SR_ARG_OPT_PKG([libftdi], [LIBFTDI], , [libftdi1 >= 1.0])
+
+# pkg-config file names: MinGW/MacOSX: hidapi; Linux: hidapi-hidraw/-libusb
+SR_ARG_OPT_PKG([libhidapi], [LIBHIDAPI], ,
+	[hidapi >= 0.8.0], [hidapi-hidraw >= 0.8.0], [hidapi-libusb >= 0.8.0])
+
+SR_ARG_OPT_PKG([libbluez], [LIBBLUEZ], , [bluez >= 4.0])
+
+SR_ARG_OPT_PKG([libnettle], [LIBNETTLE], , [nettle])
 
 # FreeBSD comes with an "integrated" libusb-1.0-style USB API.
 # This means libusb-1.0 is always available; no need to check for it.
@@ -129,6 +137,25 @@ SR_ARG_OPT_CHECK([libieee1284], [LIBIEEE1284],, [
 ])
 AS_IF([test "x$sr_have_libieee1284" = xyes],
 	[SR_PREPEND([SR_EXTRA_LIBS], [-lieee1284])])
+
+SR_ARG_OPT_PKG([libgio], [LIBGIO], , [gio-2.0 >= 2.24.0])
+
+# See if any of the (potentially platform specific) libs are available
+# which provide some means of Bluetooth communication.
+AS_IF([test "x$sr_have_libbluez" = xyes],
+	sr_have_bluetooth=yes, sr_have_bluetooth=no)
+AS_IF([test "x$sr_have_bluetooth" = xyes],
+	[AC_DEFINE([HAVE_BLUETOOTH], [1], [Specifies whether Bluetooth communication is supported.])])
+AS_IF([test "x$sr_have_bluetooth" = xyes],
+	[SR_APPEND([sr_deps_avail], [bluetooth_comm])])
+
+AS_IF([test "x$sr_have_libserialport" = xyes -o "x$sr_have_libhidapi" = xyes -o "x$sr_have_bluetooth" = xyes],
+	sr_have_serial_comm=yes, sr_have_serial_comm=no)
+AS_IF([test "x$sr_have_serial_comm" = xyes],
+	[AC_DEFINE([HAVE_SERIAL_COMM], [1], [Specifies whether serial communication is supported.])])
+AS_IF([test "x$sr_have_serial_comm" = xyes],
+	[SR_APPEND([sr_deps_avail], [serial_comm])])
+AM_CONDITIONAL([NEED_SERIAL], [test "x$sr_have_serial_comm" = xyes])
 
 ######################
 ##  Feature checks  ##
@@ -218,30 +245,29 @@ m4_define([_SR_DRIVER], [
 m4_define([SR_DRIVER],
 	[_SR_DRIVER([$1], [$2], m4_expand([AS_TR_CPP([HW_$2])]), [$3])])
 
-SR_DRIVER([Agilent DMM], [agilent-dmm], [libserialport])
-SR_DRIVER([Appa 55II], [appa-55ii], [libserialport])
-SR_DRIVER([Arachnid Labs Re:load Pro], [arachnid-labs-re-load-pro], [libserialport])
+SR_DRIVER([Agilent DMM], [agilent-dmm], [serial_comm])
+SR_DRIVER([Appa 55II], [appa-55ii], [serial_comm])
+SR_DRIVER([Arachnid Labs Re:load Pro], [arachnid-labs-re-load-pro], [serial_comm])
 SR_DRIVER([ASIX SIGMA/SIGMA2], [asix-sigma], [libftdi])
-SR_DRIVER([Atten PPS3xxx], [atten-pps3xxx], [libserialport])
+SR_DRIVER([Atten PPS3xxx], [atten-pps3xxx], [serial_comm])
 SR_DRIVER([BayLibre ACME], [baylibre-acme], [sys_timerfd_h])
 SR_DRIVER([BeagleLogic], [beaglelogic], [sys_mman_h sys_ioctl_h])
-SR_DRIVER([Brymen BM86x], [brymen-bm86x], [libusb])
-SR_DRIVER([Brymen DMM], [brymen-dmm], [libserialport])
-SR_DRIVER([CEM DT-885x], [cem-dt-885x], [libserialport])
-SR_DRIVER([Center 3xx], [center-3xx], [libserialport])
+SR_DRIVER([Brymen DMM], [brymen-dmm], [serial_comm])
+SR_DRIVER([CEM DT-885x], [cem-dt-885x], [serial_comm])
+SR_DRIVER([Center 3xx], [center-3xx], [serial_comm])
 SR_DRIVER([ChronoVu LA], [chronovu-la], [libusb libftdi])
-SR_DRIVER([Colead SLM], [colead-slm], [libserialport])
-SR_DRIVER([Conrad DIGI 35 CPU], [conrad-digi-35-cpu], [libserialport])
+SR_DRIVER([Colead SLM], [colead-slm], [serial_comm])
+SR_DRIVER([Conrad DIGI 35 CPU], [conrad-digi-35-cpu], [serial_comm])
 SR_DRIVER([demo], [demo])
 SR_DRIVER([DreamSourceLab DSLogic], [dreamsourcelab-dslogic], [libusb])
 SR_DRIVER([Fluke 45], [fluke-45])
-SR_DRIVER([Fluke DMM], [fluke-dmm], [libserialport])
+SR_DRIVER([Fluke DMM], [fluke-dmm], [serial_comm])
 SR_DRIVER([FTDI LA], [ftdi-la], [libusb libftdi])
 SR_DRIVER([fx2lafw], [fx2lafw], [libusb])
-SR_DRIVER([GMC MH 1x/2x], [gmc-mh-1x-2x], [libserialport])
-SR_DRIVER([GW Instek GDS-800], [gwinstek-gds-800], [libserialport])
-SR_DRIVER([GW Instek GPD], [gwinstek-gpd], [libserialport])
-SR_DRIVER([Hameg HMO], [hameg-hmo], [libserialport])
+SR_DRIVER([GMC MH 1x/2x], [gmc-mh-1x-2x], [serial_comm])
+SR_DRIVER([GW Instek GDS-800], [gwinstek-gds-800], [serial_comm])
+SR_DRIVER([GW Instek GPD], [gwinstek-gpd], [serial_comm])
+SR_DRIVER([Hameg HMO], [hameg-hmo], [serial_comm])
 SR_DRIVER([Hantek 4032L], [hantek-4032l], [libusb])
 SR_DRIVER([Hantek 6xxx], [hantek-6xxx], [libusb])
 SR_DRIVER([Hantek DSO], [hantek-dso], [libusb])
@@ -252,41 +278,46 @@ SR_DRIVER([Ikalogic Scanalogic-2], [ikalogic-scanalogic2], [libusb])
 SR_DRIVER([Ikalogic Scanaplus], [ikalogic-scanaplus], [libftdi])
 SR_DRIVER([IPDBG LA], [ipdbg-la])
 SR_DRIVER([Kecheng KC-330B], [kecheng-kc-330b], [libusb])
-SR_DRIVER([KERN scale], [kern-scale], [libserialport])
-SR_DRIVER([Korad KAxxxxP], [korad-kaxxxxp], [libserialport])
+SR_DRIVER([KERN scale], [kern-scale], [serial_comm])
+SR_DRIVER([Kingst LA2016], [kingst-la2016], [libusb])
+SR_DRIVER([Korad KAxxxxP], [korad-kaxxxxp], [serial_comm])
 SR_DRIVER([Lascar EL-USB], [lascar-el-usb], [libusb])
 SR_DRIVER([LeCroy LogicStudio], [lecroy-logicstudio], [libusb])
 SR_DRIVER([LeCroy X-Stream], [lecroy-xstream])
-SR_DRIVER([Manson HCS-3xxx], [manson-hcs-3xxx], [libserialport])
+SR_DRIVER([Manson HCS-3xxx], [manson-hcs-3xxx], [serial_comm])
+SR_DRIVER([Mastech MS6514], [mastech-ms6514], [serial_comm])
 SR_DRIVER([maynuo-m97], [maynuo-m97])
-SR_DRIVER([MIC 985xx], [mic-985xx], [libserialport])
+SR_DRIVER([MIC 985xx], [mic-985xx], [serial_comm])
 SR_DRIVER([Microchip PICkit2], [microchip-pickit2], [libusb])
-SR_DRIVER([Motech LPS 30x], [motech-lps-30x], [libserialport])
-SR_DRIVER([Norma DMM], [norma-dmm], [libserialport])
-SR_DRIVER([OpenBench Logic Sniffer], [openbench-logic-sniffer], [libserialport])
-SR_DRIVER([PCE PCE-322A], [pce-322a], [libserialport])
+SR_DRIVER([Mooshimeter DMM], [mooshimeter-dmm], [bluetooth_comm libgio])
+SR_DRIVER([Motech LPS 30x], [motech-lps-30x], [serial_comm])
+SR_DRIVER([Norma DMM], [norma-dmm], [serial_comm])
+SR_DRIVER([OpenBench Logic Sniffer], [openbench-logic-sniffer], [serial_comm])
+SR_DRIVER([PCE PCE-322A], [pce-322a], [serial_comm])
 SR_DRIVER([Pipistrello-OLS], [pipistrello-ols], [libftdi])
-SR_DRIVER([RDTech DPSxxxx/DPHxxxx], [rdtech-dps], [libserialport])
+SR_DRIVER([RDTech DPSxxxx/DPHxxxx], [rdtech-dps], [serial_comm])
+SR_DRIVER([RDTech UMXX], [rdtech-um], [serial_comm])
+SR_DRIVER([RDTech TCXX], [rdtech-tc], [serial_comm libnettle])
 SR_DRIVER([Rigol DS], [rigol-ds])
-SR_DRIVER([Rohde&Schwarz SME-0x], [rohde-schwarz-sme-0x], [libserialport])
+SR_DRIVER([Rohde&Schwarz SME-0x], [rohde-schwarz-sme-0x], [serial_comm])
 SR_DRIVER([Saleae Logic16], [saleae-logic16], [libusb])
 SR_DRIVER([Saleae Logic Pro], [saleae-logic-pro], [libusb])
 SR_DRIVER([SCPI DMM], [scpi-dmm])
 SR_DRIVER([SCPI PPS], [scpi-pps])
-SR_DRIVER([serial DMM], [serial-dmm], [libserialport])
-SR_DRIVER([serial LCR], [serial-lcr], [libserialport])
+SR_DRIVER([serial DMM], [serial-dmm], [serial_comm])
+SR_DRIVER([serial LCR], [serial-lcr], [serial_comm])
 SR_DRIVER([Siglent SDS], [siglent-sds])
 SR_DRIVER([Sysclk LWLA], [sysclk-lwla], [libusb])
 SR_DRIVER([Sysclk SLA5032], [sysclk-sla5032], [libusb])
-SR_DRIVER([Teleinfo], [teleinfo], [libserialport])
+SR_DRIVER([Teleinfo], [teleinfo], [serial_comm])
 SR_DRIVER([Testo], [testo], [libusb])
-SR_DRIVER([Tondaj SL-814], [tondaj-sl-814], [libserialport])
+SR_DRIVER([Tondaj SL-814], [tondaj-sl-814], [serial_comm])
 SR_DRIVER([UNI-T DMM], [uni-t-dmm], [libusb])
-SR_DRIVER([UNI-T UT32x], [uni-t-ut32x], [libusb])
-SR_DRIVER([Victor DMM], [victor-dmm], [libusb])
+SR_DRIVER([UNI-T UT181A], [uni-t-ut181a], [serial_comm])
+SR_DRIVER([UNI-T UT32x], [uni-t-ut32x], [serial_comm])
 SR_DRIVER([Yokogawa DL/DLM], [yokogawa-dlm])
 SR_DRIVER([ZEROPLUS Logic Cube], [zeroplus-logic-cube], [libusb])
-SR_DRIVER([ZKETECH EBD-USB], [zketech-ebd-usb], [libserialport])
+SR_DRIVER([ZKETECH EBD-USB], [zketech-ebd-usb], [serial_comm])
 
 ###############################
 ##  Language bindings setup  ##
@@ -410,7 +441,7 @@ AS_IF([test "x$HAVE_PYMOD_NUMPY" != xyes],
 	[SR_APPEND([sr_python_missing], [', '], [numpy])])
 
 # The Python bindings use SWIG to generate code.
-AC_CHECK_PROGS([SWIG], [swig swig3.0 swig2.0])
+AC_CHECK_PROGS([SWIG], [swig swig4.0 swig3.0 swig2.0])
 AS_IF([test "x$SWIG" != x],
     AC_MSG_CHECKING([for $SWIG version])
     [SWIG_VERSION=`$SWIG -version 2>&1 | sed -n 's/SWIG Version //p'`]
@@ -448,8 +479,8 @@ sr_rbminor=${sr_rbminor%%.*}
 
 # The Ruby bindings need Ruby development files.
 SR_PKG_CHECK([ruby_dev], [SR_PKGLIBS_RUBY],
-	[ruby],
-	[ruby-$sr_rbmajor.$sr_rbminor])
+	[ruby >= 2.5.0],
+	[ruby-$sr_rbmajor.$sr_rbminor >= 2.5.0])
 
 AS_IF([test "x$sr_have_ruby_dev" != xyes],
 	[SR_APPEND([sr_ruby_missing], [', '], [Headers])])
@@ -601,10 +632,17 @@ Detected libraries (optional):
 $sr_pkglibs_summary
 Enabled hardware drivers:
 $sr_driver_summary
+Enabled serial communication transports:
+  - serial comm ................... $sr_have_serial_comm
+  - libserialport ................. $sr_have_libserialport
+  - hidapi ........................ $sr_have_libhidapi
+  - bluetooth ..................... $sr_have_bluetooth
+  - bluez ......................... $sr_have_libbluez
+
 Enabled SCPI backends:
  - TCP............................. yes
  - RPC............................. $sr_cv_have_rpc
- - serial.......................... $sr_have_libserialport
+ - serial.......................... $sr_have_serial_comm
  - VISA............................ $sr_have_librevisa
  - GPIB............................ $sr_have_libgpib
  - USBTMC.......................... $sr_have_libusb

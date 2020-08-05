@@ -18,7 +18,9 @@
  */
 
 /* Needed for POSIX.1-2008 locale functions */
+/** @cond PRIVATE */
 #define _XOPEN_SOURCE 700
+/** @endcond */
 #include <config.h>
 #include <ctype.h>
 #include <locale.h>
@@ -55,8 +57,6 @@
  */
 
 /**
- * @private
- *
  * Convert a string representation of a numeric value (base 10) to a long integer. The
  * conversion is strict and will fail if the complete string does not represent
  * a valid long integer. The function sets errno according to the details of the
@@ -67,6 +67,8 @@
  *
  * @retval SR_OK Conversion successful.
  * @retval SR_ERR Failure.
+ *
+ * @private
  */
 SR_PRIV int sr_atol(const char *str, long *ret)
 {
@@ -90,8 +92,60 @@ SR_PRIV int sr_atol(const char *str, long *ret)
 }
 
 /**
+ * Convert a text to a number including support for non-decimal bases.
+ * Also optionally returns the position after the number, where callers
+ * can either error out, or support application specific suffixes.
+ *
+ * @param[in] str The input text to convert.
+ * @param[out] ret The conversion result.
+ * @param[out] end The position after the number.
+ * @param[in] base The number format's base, can be 0.
+ *
+ * @retval SR_OK Conversion successful.
+ * @retval SR_ERR Conversion failed.
+ *
  * @private
  *
+ * This routine is more general than @ref sr_atol(), which strictly
+ * expects the input text to contain just a decimal number, and nothing
+ * else in addition. The @ref sr_atol_base() routine accepts trailing
+ * text after the number, and supports non-decimal numbers (bin, hex),
+ * including automatic detection from prefix text.
+ */
+SR_PRIV int sr_atol_base(const char *str, long *ret, char **end, int base)
+{
+	long num;
+	char *endptr;
+
+	/* Add "0b" prefix support which strtol(3) may be missing. */
+	while (str && isspace(*str))
+		str++;
+	if (!base && strncmp(str, "0b", strlen("0b")) == 0) {
+		str += strlen("0b");
+		base = 2;
+	}
+
+	/* Run the number conversion. Quick bail out if that fails. */
+	errno = 0;
+	endptr = NULL;
+	num = strtol(str, &endptr, base);
+	if (!endptr || errno) {
+		if (!errno)
+			errno = EINVAL;
+		return SR_ERR;
+	}
+	*ret = num;
+
+	/* Advance to optional non-space trailing suffix. */
+	while (endptr && isspace(*endptr))
+		endptr++;
+	if (end)
+		*end = endptr;
+
+	return SR_OK;
+}
+
+/**
  * Convert a string representation of a numeric value (base 10) to an integer. The
  * conversion is strict and will fail if the complete string does not represent
  * a valid integer. The function sets errno according to the details of the
@@ -102,6 +156,8 @@ SR_PRIV int sr_atol(const char *str, long *ret)
  *
  * @retval SR_OK Conversion successful.
  * @retval SR_ERR Failure.
+ *
+ * @private
  */
 SR_PRIV int sr_atoi(const char *str, int *ret)
 {
@@ -120,8 +176,6 @@ SR_PRIV int sr_atoi(const char *str, int *ret)
 }
 
 /**
- * @private
- *
  * Convert a string representation of a numeric value to a double. The
  * conversion is strict and will fail if the complete string does not represent
  * a valid double. The function sets errno according to the details of the
@@ -132,6 +186,8 @@ SR_PRIV int sr_atoi(const char *str, int *ret)
  *
  * @retval SR_OK Conversion successful.
  * @retval SR_ERR Failure.
+ *
+ * @private
  */
 SR_PRIV int sr_atod(const char *str, double *ret)
 {
@@ -155,8 +211,6 @@ SR_PRIV int sr_atod(const char *str, double *ret)
 }
 
 /**
- * @private
- *
  * Convert a string representation of a numeric value to a float. The
  * conversion is strict and will fail if the complete string does not represent
  * a valid float. The function sets errno according to the details of the
@@ -167,6 +221,8 @@ SR_PRIV int sr_atod(const char *str, double *ret)
  *
  * @retval SR_OK Conversion successful.
  * @retval SR_ERR Failure.
+ *
+ * @private
  */
 SR_PRIV int sr_atof(const char *str, float *ret)
 {
@@ -185,8 +241,6 @@ SR_PRIV int sr_atof(const char *str, float *ret)
 }
 
 /**
- * @private
- *
  * Convert a string representation of a numeric value to a double. The
  * conversion is strict and will fail if the complete string does not represent
  * a valid double. The function sets errno according to the details of the
@@ -197,6 +251,8 @@ SR_PRIV int sr_atof(const char *str, float *ret)
  *
  * @retval SR_OK Conversion successful.
  * @retval SR_ERR Failure.
+ *
+ * @private
  */
 SR_PRIV int sr_atod_ascii(const char *str, double *ret)
 {
@@ -217,8 +273,6 @@ SR_PRIV int sr_atod_ascii(const char *str, double *ret)
 }
 
 /**
- * @private
- *
  * Convert a string representation of a numeric value to a float. The
  * conversion is strict and will fail if the complete string does not represent
  * a valid float. The function sets errno according to the details of the
@@ -229,6 +283,8 @@ SR_PRIV int sr_atod_ascii(const char *str, double *ret)
  *
  * @retval SR_OK Conversion successful.
  * @retval SR_ERR Failure.
+ *
+ * @private
  */
 SR_PRIV int sr_atof_ascii(const char *str, float *ret)
 {
@@ -593,12 +649,14 @@ SR_API int sr_vsnprintf_ascii(char *buf, size_t buf_size,
 /**
  * Convert a sequence of bytes to its textual representation ("hex dump").
  *
- * Callers should free the allocated GString. See @ref sr_hexdump_free().
+ * Callers should free the allocated GString. See sr_hexdump_free().
  *
  * @param[in] data Pointer to the byte sequence to print.
  * @param[in] len Number of bytes to print.
  *
- * @return #NULL upon error, newly allocated GString pointer otherwise.
+ * @return NULL upon error, newly allocated GString pointer otherwise.
+ *
+ * @private
  */
 SR_PRIV GString *sr_hexdump_new(const uint8_t *data, const size_t len)
 {
@@ -616,9 +674,11 @@ SR_PRIV GString *sr_hexdump_new(const uint8_t *data, const size_t len)
 }
 
 /**
- * Free a hex dump text that was created by @ref sr_hexdump_new().
+ * Free a hex dump text that was created by sr_hexdump_new().
  *
  * @param[in] s Pointer to the GString to release.
+ *
+ * @private
  */
 SR_PRIV void sr_hexdump_free(GString *s)
 {

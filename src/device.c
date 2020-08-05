@@ -92,7 +92,9 @@ SR_PRIV void sr_channel_free(struct sr_channel *ch)
 }
 
 /**
- * Wrapper around @ref sr_channel_free(), suitable for glib iterators.
+ * Wrapper around sr_channel_free(), suitable for glib iterators.
+ *
+ * @private
  */
 SR_PRIV void sr_channel_free_cb(void *p)
 {
@@ -201,9 +203,9 @@ SR_PRIV struct sr_channel *sr_next_enabled_channel(const struct sr_dev_inst *sdi
  * @param[in] ch1 First channel.
  * @param[in] ch2 Second channel.
  *
- * @return #TRUE upon differences or unexpected input, #FALSE otherwise.
+ * @return TRUE upon differences or unexpected input, FALSE otherwise.
  *
- * @internal
+ * @private
  */
 SR_PRIV gboolean sr_channels_differ(struct sr_channel *ch1, struct sr_channel *ch2)
 {
@@ -227,9 +229,9 @@ SR_PRIV gboolean sr_channels_differ(struct sr_channel *ch1, struct sr_channel *c
  * @param[in] l1 First channel list.
  * @param[in] l2 Second channel list.
  *
- * @return #TRUE upon differences or unexpected input, #FALSE otherwise.
+ * @return TRUE upon differences or unexpected input, FALSE otherwise.
  *
- * @internal
+ * @private
  */
 SR_PRIV gboolean sr_channel_lists_differ(GSList *l1, GSList *l2)
 {
@@ -418,6 +420,7 @@ SR_API struct sr_dev_inst *sr_dev_inst_user_new(const char *vendor,
 /**
  * Add a new channel to the specified device instance.
  *
+ * @param[in] sdi Device instance to use. Must not be NULL.
  * @param[in] index @copydoc sr_channel::index
  * @param[in] type @copydoc sr_channel::type
  * @param[in] name @copydoc sr_channel::name
@@ -518,7 +521,7 @@ SR_PRIV void sr_usb_dev_inst_free(struct sr_usb_dev_inst *usb)
 
 #endif
 
-#ifdef HAVE_LIBSERIALPORT
+#ifdef HAVE_SERIAL_COMM
 
 /**
  * Allocate and init a struct for a serial device instance.
@@ -814,7 +817,7 @@ SR_API const char *sr_dev_inst_connid_get(const struct sr_dev_inst *sdi)
 	struct libusb_device **devlist;
 #endif
 
-#ifdef HAVE_LIBSERIALPORT
+#ifdef HAVE_SERIAL_COMM
 	struct sr_serial_dev_inst *serial;
 #endif
 
@@ -824,7 +827,7 @@ SR_API const char *sr_dev_inst_connid_get(const struct sr_dev_inst *sdi)
 	if (!sdi)
 		return NULL;
 
-#ifdef HAVE_LIBSERIALPORT
+#ifdef HAVE_SERIAL_COMM
 	if ((!sdi->connection_id) && (sdi->inst_type == SR_INST_SERIAL)) {
 		/* connection_id isn't populated, let's do that for serial devices. */
 

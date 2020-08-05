@@ -22,7 +22,6 @@
  *
  * Metex 14-bytes ASCII protocol parser.
  *
- * @internal
  * This should work for various multimeters which use this kind of protocol,
  * even though there is some variation in which modes each DMM supports.
  *
@@ -329,7 +328,7 @@ static gboolean flags_valid(const struct metex14_info *info)
 	return TRUE;
 }
 
-#ifdef HAVE_LIBSERIALPORT
+#ifdef HAVE_SERIAL_COMM
 SR_PRIV int sr_metex14_packet_request(struct sr_serial_dev_inst *serial)
 {
 	const uint8_t wbuf = 'D';

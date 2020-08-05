@@ -407,21 +407,11 @@ static void create_channels(struct sr_input *in)
 
 static void send_metadata(struct sr_input *in)
 {
-	struct sr_datafeed_packet packet;
-	struct sr_datafeed_meta meta;
-	struct sr_config *src;
 	struct context *inc;
 
 	inc = in->priv;
-
-	packet.type = SR_DF_META;
-	packet.payload = &meta;
-	src = sr_config_new(SR_CONF_SAMPLERATE, g_variant_new_uint64(inc->samplerate));
-	meta.config = g_slist_append(NULL, src);
-	sr_session_send(in->sdi, &packet);
-	g_slist_free(meta.config);
-	sr_config_free(src);
-
+	(void)sr_session_send_meta(in->sdi, SR_CONF_SAMPLERATE,
+		g_variant_new_uint64(inc->samplerate));
 	inc->meta_sent = TRUE;
 }
 
@@ -447,7 +437,6 @@ static void flush_output_buffer(struct sr_input *in)
 
 static void process_record_pi(struct sr_input *in, gsize start)
 {
-	struct sr_datafeed_packet packet;
 	struct context *inc;
 	uint64_t timestamp, next_timestamp;
 	uint32_t pod_data;
@@ -550,6 +539,7 @@ static void process_record_pi(struct sr_input *in, gsize start)
 			pod_data |= (RL16(buf->str + start + 0x29) & 32) << 11;
 			break;
 		default:
+			pod_data = 0;
 			sr_err("Don't know how to obtain data for pod %d.", pod);
 		}
 
@@ -579,10 +569,7 @@ static void process_record_pi(struct sr_input *in, gsize start)
 	if (timestamp == inc->trigger_timestamp && !inc->trigger_sent) {
 		sr_dbg("Trigger @%lf s, record #%d.",
 			timestamp * TIMESTAMP_RESOLUTION, inc->cur_record);
-
-		packet.type = SR_DF_TRIGGER;
-		packet.payload = NULL;
-		sr_session_send(in->sdi, &packet);
+		std_session_send_df_trigger(in->sdi);
 		inc->trigger_sent = TRUE;
 	}
 
@@ -609,7 +596,6 @@ static void process_record_pi(struct sr_input *in, gsize start)
 
 static void process_record_iprobe(struct sr_input *in, gsize start)
 {
-	struct sr_datafeed_packet packet;
 	struct context *inc;
 	uint64_t timestamp, next_timestamp;
 	char single_payload[3];
@@ -632,10 +618,7 @@ static void process_record_iprobe(struct sr_input *in, gsize start)
 	if (timestamp == inc->trigger_timestamp && !inc->trigger_sent) {
 		sr_dbg("Trigger @%lf s, record #%d.",
 			timestamp * TIMESTAMP_RESOLUTION, inc->cur_record);
-
-		packet.type = SR_DF_TRIGGER;
-		packet.payload = NULL;
-		sr_session_send(in->sdi, &packet);
+		std_session_send_df_trigger(in->sdi);
 		inc->trigger_sent = TRUE;
 	}
 

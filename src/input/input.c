@@ -29,7 +29,9 @@
 #define LOG_PREFIX "input"
 /** @endcond */
 
+/** @cond PRIVATE */
 #define CHUNK_SIZE	(4 * 1024 * 1024)
+/** @endcond */
 
 /**
  * @file
@@ -69,8 +71,9 @@ extern SR_PRIV struct sr_input_module input_vcd;
 extern SR_PRIV struct sr_input_module input_wav;
 extern SR_PRIV struct sr_input_module input_raw_analog;
 extern SR_PRIV struct sr_input_module input_logicport;
+extern SR_PRIV struct sr_input_module input_saleae;
 extern SR_PRIV struct sr_input_module input_null;
-/* @endcond */
+/** @endcond */
 
 static const struct sr_input_module *input_module_list[] = {
 	&input_binary,
@@ -81,6 +84,7 @@ static const struct sr_input_module *input_module_list[] = {
 	&input_wav,
 	&input_raw_analog,
 	&input_logicport,
+	&input_saleae,
 	&input_null,
 	NULL,
 };
