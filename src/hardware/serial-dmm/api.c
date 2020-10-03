@@ -130,6 +130,8 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 	sdi->conn = serial;
 	sdi->priv = devc;
 	dmm->channel_count = 1;
+	if (dmm->packet_parse == sr_brymen_bm52x_parse)
+		dmm->channel_count = BRYMEN_BM52X_DISPLAY_COUNT;
 	if (dmm->packet_parse == sr_brymen_bm86x_parse)
 		dmm->channel_count = BRYMEN_BM86X_DISPLAY_COUNT;
 	if (dmm->packet_parse == sr_eev121gw_3displays_parse) {
@@ -252,6 +254,15 @@ SR_REGISTER_DEV_DRIVER_LIST(serial_dmm_drivers,
 		"Brymen", "BM25x", "9600/8n1/rts=1/dtr=1",
 		BRYMEN_BM25X_PACKET_SIZE, 0, 0, NULL,
 		sr_brymen_bm25x_packet_valid, sr_brymen_bm25x_parse,
+		NULL
+	),
+	/* }}} */
+	/* bm52x based meters {{{ */
+	DMM_CONN(
+		"brymen-bm52x", brymen_bm52x, "Brymen", "BM52x",
+		"hid/bu86x", NULL, BRYMEN_BM52X_PACKET_SIZE, 4000, 500,
+		sr_brymen_bm52x_packet_request,
+		sr_brymen_bm52x_packet_valid, sr_brymen_bm52x_parse,
 		NULL
 	),
 	/* }}} */
@@ -418,6 +429,12 @@ SR_REGISTER_DEV_DRIVER_LIST(serial_dmm_drivers,
 	),
 	/* }}} */
 	/* fs9922 based meters {{{ */
+	DMM(
+		"gwinstek-gdm-397", fs9922,
+		"GW Instek", "GDM-397", "2400/8n1/rts=0/dtr=1",
+		FS9922_PACKET_SIZE, 0, 0, NULL,
+		sr_fs9922_packet_valid, sr_fs9922_parse, NULL
+	),
 	DMM(
 		"sparkfun-70c", fs9922,
 		"SparkFun", "70C", "2400/8n1/rts=0/dtr=1",

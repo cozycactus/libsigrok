@@ -148,47 +148,71 @@ SR_PRIV gboolean brymen_packet_is_valid(const uint8_t *buf)
 	return TRUE;
 }
 
-static int parse_value(const char *strbuf, int len, float *floatval)
+static int parse_value(const char *txt, size_t len, float *floatval)
 {
-	int s, d;
-	char str[32];
+	const char *txt_end;
+	char c, buf[32], *dst;
+	int ret;
 
-	if (strstr(strbuf, "OL")) {
-		sr_dbg("Overlimit.");
+	/*
+	 * The input text is not NUL terminated, the checksum follows
+	 * the value text field. Spaces may interfere with the text to
+	 * number conversion, especially with exponent parsing. Copy the
+	 * input data to a terminated text buffer and strip spaces in the
+	 * process, before running ASCIIZ string operations.
+	 */
+	if (len >= sizeof(buf)) {
+		sr_err("Insufficient text conversion buffer size.");
+		return SR_ERR_BUG;
+	}
+	txt_end = txt + len;
+	dst = &buf[0];
+	while (txt < txt_end && *txt) {
+		c = *txt++;
+		if (c == ' ')
+			continue;
+		*dst++ = c;
+	}
+	*dst = '\0';
+
+	/* Check for overflow, or get the number value. */
+	if (strstr(buf, "+OL")) {
+		*floatval = +INFINITY;
+		return SR_OK;
+	}
+	if (strstr(buf, "-OL")) {
+		*floatval = -INFINITY;
+		return SR_OK;
+	}
+	if (strstr(buf, "OL")) {
 		*floatval = INFINITY;
 		return SR_OK;
 	}
-
-	memset(str, 0, sizeof(str));
-	/* Spaces may interfere with parsing the exponent. Strip them. */
-	for (s = 0, d = 0; s < len; s++) {
-		if (strbuf[s] != ' ')
-			str[d++] = strbuf[s];
-	}
-	if (sr_atof_ascii(str, floatval) != SR_OK)
-		return SR_ERR;
+	ret = sr_atof_ascii(buf, floatval);
+	if (ret != SR_OK)
+		return ret;
 
 	return SR_OK;
 }
 
-static void parse_flags(const uint8_t *buf, struct brymen_flags *info)
+static void parse_flags(const uint8_t *bfunc, struct brymen_flags *info)
 {
-	info->is_low_batt	= (buf[4 + 3] & (1 << 7)) != 0;
+	info->is_low_batt	= (bfunc[3] & (1 << 7)) != 0;
 
-	info->is_decibel	= (buf[4 + 1] & (1 << 5)) != 0;
-	info->is_duty_cycle	= (buf[4 + 1] & (1 << 3)) != 0;
-	info->is_hertz		= (buf[4 + 1] & (1 << 2)) != 0;
-	info->is_amp		= (buf[4 + 1] & (1 << 1)) != 0;
-	info->is_beep		= (buf[4 + 1] & (1 << 0)) != 0;
+	info->is_decibel	= (bfunc[1] & (1 << 5)) != 0;
+	info->is_duty_cycle	= (bfunc[1] & (1 << 3)) != 0;
+	info->is_hertz		= (bfunc[1] & (1 << 2)) != 0;
+	info->is_amp		= (bfunc[1] & (1 << 1)) != 0;
+	info->is_beep		= (bfunc[1] & (1 << 0)) != 0;
 
-	info->is_ohm		= (buf[4 + 0] & (1 << 7)) != 0;
-	info->is_fahrenheit	= (buf[4 + 0] & (1 << 6)) != 0;
-	info->is_celsius	= (buf[4 + 0] & (1 << 5)) != 0;
-	info->is_diode		= (buf[4 + 0] & (1 << 4)) != 0;
-	info->is_capacitance	= (buf[4 + 0] & (1 << 3)) != 0;
-	info->is_volt		= (buf[4 + 0] & (1 << 2)) != 0;
-	info->is_dc		= (buf[4 + 0] & (1 << 1)) != 0;
-	info->is_ac		= (buf[4 + 0] & (1 << 0)) != 0;
+	info->is_ohm		= (bfunc[0] & (1 << 7)) != 0;
+	info->is_fahrenheit	= (bfunc[0] & (1 << 6)) != 0;
+	info->is_celsius	= (bfunc[0] & (1 << 5)) != 0;
+	info->is_diode		= (bfunc[0] & (1 << 4)) != 0;
+	info->is_capacitance	= (bfunc[0] & (1 << 3)) != 0;
+	info->is_volt		= (bfunc[0] & (1 << 2)) != 0;
+	info->is_dc		= (bfunc[0] & (1 << 1)) != 0;
+	info->is_ac		= (bfunc[0] & (1 << 0)) != 0;
 }
 
 SR_PRIV int brymen_parse(const uint8_t *buf, float *floatval,
@@ -197,26 +221,57 @@ SR_PRIV int brymen_parse(const uint8_t *buf, float *floatval,
 	struct brymen_flags flags;
 	struct brymen_header *hdr;
 	uint8_t *bfunc;
-	int asciilen;
+	const char *txt;
+	int txtlen;
+	char *p;
+	char *unit;
+	int ret;
 
 	(void)info;
 
 	hdr = (void *)buf;
 	bfunc = (uint8_t *)(buf + sizeof(struct brymen_header));
+	txt = (const char *)&bfunc[4];
+	txtlen = hdr->len - 4;
+	sr_dbg("DMM bfunc: %02x %02x %02x %02x, text '%.*s'",
+		bfunc[3], bfunc[2], bfunc[1], bfunc[0], txtlen, txt);
 
-	analog->meaning->mqflags = 0;
-
-	/* Give some debug info about the package. */
-	asciilen = hdr->len - 4;
-	sr_dbg("DMM flags: %.2x %.2x %.2x %.2x",
-	       bfunc[3], bfunc[2], bfunc[1], bfunc[0]);
-	/* Value is an ASCII string. */
-	sr_dbg("DMM packet: \"%.*s\"", asciilen, bfunc + 4);
-
-	parse_flags(buf, &flags);
-	if (parse_value((const char *)(bfunc + 4), asciilen, floatval) != SR_OK)
+	memset(&flags, 0, sizeof(flags));
+	parse_flags(bfunc, &flags);
+	if (flags.is_decibel && flags.is_ohm) {
+		/*
+		 * The reference impedance for the dBm function is in an
+		 * unexpected format. Naive conversion of non-space chars
+		 * gives incorrect results. Isolate the 4..1200 Ohms value
+		 * instead, ignore the "0." and exponent parts of the
+		 * response text.
+		 */
+		if (strncmp(txt, " 0.", strlen(" 0.")) == 0 && strstr(txt, " E")) {
+			txt = &txt[strlen(" 0.")];
+			txtlen -= strlen(" 0.");
+			p = strchr(txt, 'E');
+			if (p)
+				*p = '\0';
+		}
+	}
+	if (flags.is_fahrenheit || flags.is_celsius) {
+		/*
+		 * The value text in temperature mode includes the C/F
+		 * suffix between the mantissa and the exponent, which
+		 * breaks the text to number conversion. Example data:
+		 * " 0.0217CE+3". Remove the C/F unit identifier.
+		 */
+		unit = strchr(txt, flags.is_fahrenheit ? 'F' : 'C');
+		if (!unit)
+			return SR_ERR;
+		*unit = ' ';
+	}
+	ret = parse_value(txt, txtlen, floatval);
+	sr_dbg("floatval: %f, ret %d", *floatval, ret);
+	if (ret != SR_OK)
 		return SR_ERR;
 
+	analog->meaning->mqflags = 0;
 	if (flags.is_volt) {
 		analog->meaning->mq = SR_MQ_VOLTAGE;
 		analog->meaning->unit = SR_UNIT_VOLT;
@@ -226,7 +281,9 @@ SR_PRIV int brymen_parse(const uint8_t *buf, float *floatval,
 		analog->meaning->unit = SR_UNIT_AMPERE;
 	}
 	if (flags.is_ohm) {
-		if (flags.is_beep)
+		if (flags.is_decibel)
+			analog->meaning->mq = SR_MQ_RESISTANCE;
+		else if (flags.is_beep)
 			analog->meaning->mq = SR_MQ_CONTINUITY;
 		else
 			analog->meaning->mq = SR_MQ_RESISTANCE;
@@ -258,20 +315,25 @@ SR_PRIV int brymen_parse(const uint8_t *buf, float *floatval,
 	}
 
 	/*
-	 * The high-end Brymen models have a configurable reference impedance.
-	 * When the reference impedance is changed, the DMM sends one packet
-	 * with the value of the new reference impedance. Both decibel and ohm
-	 * flags are set in this case, so we must be careful to correctly
-	 * identify the value as ohm, not dBmW.
+	 * The high-end Brymen models have a configurable reference
+	 * impedance for dBm measurements. When the meter's function
+	 * is entered, or when the reference impedance is changed, the
+	 * meter sends one packet with the value of the new reference.
+	 * Both decibel and ohm flags are set in this case, so we must
+	 * be careful to not clobber the resistance value from above,
+	 * and only provide dBm when the measurement is shown and not
+	 * its reference.
+	 *
+	 * The meter's response values also use an unexpected scale
+	 * (always off by factor 1000, as if it was Watts not mW).
+	 *
+	 * Example responses:
+	 * bfunc: 00 00 20 80, text ' 0. 800 E+1' (reference)
+	 * bfunc: 00 00 20 00, text '-0.3702 E-1' (measurement)
 	 */
 	if (flags.is_decibel && !flags.is_ohm) {
 		analog->meaning->mq = SR_MQ_POWER;
 		analog->meaning->unit = SR_UNIT_DECIBEL_MW;
-		/*
-		 * For some reason, dBm measurements are sent by the multimeter
-		 * with a value three orders of magnitude smaller than the
-		 * displayed value.
-		 */
 		*floatval *= 1000;
 	}
 
@@ -284,7 +346,7 @@ SR_PRIV int brymen_parse(const uint8_t *buf, float *floatval,
 		analog->meaning->mqflags |= SR_MQFLAG_DC;
 
 	if (flags.is_low_batt)
-		sr_info("Low battery!");
+		sr_warn("Low battery!");
 
 	return SR_OK;
 }

@@ -165,6 +165,7 @@ endif
 libsigrok_la_SOURCES += \
 	src/dmm/asycii.c \
 	src/dmm/bm25x.c \
+	src/dmm/bm52x.c \
 	src/dmm/bm86x.c \
 	src/dmm/dtm0660.c \
 	src/dmm/eev121gw.c \
@@ -540,6 +541,12 @@ src_libdrivers_la_SOURCES += \
 	src/hardware/rdtech-tc/protocol.h \
 	src/hardware/rdtech-tc/protocol.c \
 	src/hardware/rdtech-tc/api.c
+endif
+if HW_RIGOL_DG
+src_libdrivers_la_SOURCES += \
+	src/hardware/rigol-dg/protocol.h \
+	src/hardware/rigol-dg/protocol.c \
+	src/hardware/rigol-dg/api.c
 endif
 if HW_RIGOL_DS
 src_libdrivers_la_SOURCES += \
