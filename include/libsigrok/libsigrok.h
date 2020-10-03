@@ -235,6 +235,8 @@ enum sr_mq {
 	SR_MQ_HARMONIC_RATIO,
 	/** Energy. */
 	SR_MQ_ENERGY,
+	/** Electric charge. */
+	SR_MQ_ELECTRIC_CHARGE,
 
 	/* Update sr_key_info_mq[] (hwdriver.c) upon changes! */
 };
@@ -292,7 +294,7 @@ enum sr_unit {
 	SR_UNIT_VOLT_AMPERE,
 	/** Real power [W]. */
 	SR_UNIT_WATT,
-	/** Consumption [Wh]. */
+	/** Energy (consumption) in watt hour [Wh]. */
 	SR_UNIT_WATT_HOUR,
 	/** Wind speed in meters per second. */
 	SR_UNIT_METER_SECOND,
@@ -326,6 +328,12 @@ enum sr_unit {
 	SR_UNIT_TOLA,
 	/** Pieces (number of items). */
 	SR_UNIT_PIECE,
+	/** Energy in joule. */
+	SR_UNIT_JOULE,
+	/** Electric charge in coulomb. */
+	SR_UNIT_COULOMB,
+	/** Electric charge in ampere hour [Ah]. */
+	SR_UNIT_AMPERE_HOUR,
 
 	/*
 	 * Update unit_strings[] (analog.c) and fancyprint() (output/analog.c)
@@ -753,6 +761,16 @@ enum sr_configkey {
 	 */
 	SR_CONF_MODBUSADDR,
 
+	/**
+	 * User specified forced driver attachment to unknown devices.
+	 *
+	 * By design the interpretation of the string depends on the
+	 * specific driver. It typically would be either a replacement
+	 * '*IDN?' response value, or a sub-driver name. But could also
+	 * be anything else and totally arbitrary.
+	 */
+	SR_CONF_FORCE_DETECT,
+
 	/* Update sr_key_info_config[] (hwdriver.c) upon changes! */
 
 	/*--- Device (or channel group) configuration -----------------------*/
@@ -1022,6 +1040,12 @@ enum sr_configkey {
 
 	/** The number of digits (e.g. for a DMM). */
 	SR_CONF_DIGITS,
+
+	/** Phase of a source signal. */
+	SR_CONF_PHASE,
+
+	/** Duty cycle of a source signal. */
+	SR_CONF_DUTY_CYCLE,
 
 	/* Update sr_key_info_config[] (hwdriver.c) upon changes! */
 

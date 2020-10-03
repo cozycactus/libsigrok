@@ -93,13 +93,19 @@ struct context {
 	uint32_t num_samples;
 	uint32_t channel_count, logic_channel_count;
 	uint32_t channels_seen;
-	uint64_t period;
-	uint64_t sample_time;
+	uint64_t sample_rate;
+	uint64_t sample_scale;
+	uint64_t out_sample_count;
 	uint8_t *previous_sample;
 	float *analog_samples;
 	uint8_t *logic_samples;
 	const char *xlabel;	/* Don't free: will point to a static string. */
 	const char *title;	/* Don't free: will point into the driver struct. */
+
+	/* Input data constraints check. */
+	gboolean have_checked;
+	gboolean have_frames;
+	uint64_t pkt_snums;
 };
 
 /*
@@ -218,31 +224,28 @@ static GString *gen_header(const struct sr_output *o,
 	GString *header;
 	GSList *channels, *l;
 	unsigned int num_channels, i;
-	uint64_t samplerate = 0, sr;
 	char *samplerate_s;
 
 	ctx = o->priv;
 	header = g_string_sized_new(512);
 
-	if (ctx->period == 0) {
+	if (ctx->sample_rate == 0) {
 		if (sr_config_get(o->sdi->driver, o->sdi, NULL,
 				  SR_CONF_SAMPLERATE, &gvar) == SR_OK) {
-			samplerate = g_variant_get_uint64(gvar);
+			ctx->sample_rate = g_variant_get_uint64(gvar);
 			g_variant_unref(gvar);
 		}
 
 		i = 0;
-		sr = 1;
-		while (sr < samplerate) {
+		ctx->sample_scale = 1;
+		while (ctx->sample_scale < ctx->sample_rate) {
 			i++;
-			sr *= 1000;
+			ctx->sample_scale *= 1000;
 		}
-		if (samplerate)
-			ctx->period = sr / samplerate;
 		if (i < ARRAY_SIZE(xlabels))
 			ctx->xlabel = xlabels[i];
-		sr_info("Set sample period to %" PRIu64 " %s",
-			ctx->period, ctx->xlabel);
+		sr_info("Set sample rate, scale to %" PRIu64 ", %" PRIu64 " %s",
+			ctx->sample_rate, ctx->sample_scale, ctx->xlabel);
 	}
 	ctx->title = (o->sdi && o->sdi->driver) ? o->sdi->driver->longname : "unknown";
 
@@ -271,14 +274,18 @@ static GString *gen_header(const struct sr_output *o,
 			g_string_truncate(header, header->len - 1);
 		}
 		g_string_append_printf(header, "\n");
-		if (samplerate != 0) {
-			samplerate_s = sr_samplerate_string(samplerate);
+		if (ctx->sample_rate != 0) {
+			samplerate_s = sr_samplerate_string(ctx->sample_rate);
 			g_string_append_printf(header, "%s Samplerate: %s\n",
 					       ctx->comment, samplerate_s);
 			g_free(samplerate_s);
 		}
 		ctx->did_header = TRUE;
 	}
+
+	/* Time column requested but samplerate unknown. Emit a warning. */
+	if (ctx->time && !ctx->sample_rate)
+		sr_warn("Samplerate unknown, cannot provide timestamps.");
 
 	return header;
 }
@@ -401,6 +408,8 @@ static void process_logic(struct context *ctx,
 static void dump_saved_values(struct context *ctx, GString **out)
 {
 	unsigned int i, j, analog_size, num_channels;
+	double sample_time_dbl;
+	uint64_t sample_time_u64;
 	float *analog_sample, value;
 	uint8_t *logic_sample;
 
@@ -411,15 +420,16 @@ static void dump_saved_values(struct context *ctx, GString **out)
 	} else {
 		sr_info("Dumping %u samples", ctx->num_samples);
 
-		*out = g_string_sized_new(512);
+		if (!*out)
+			*out = g_string_sized_new(512);
 		num_channels =
 		    ctx->num_logic_channels + ctx->num_analog_channels;
 
 		if (ctx->label_do) {
 			if (ctx->time)
 				g_string_append_printf(*out, "%s%s",
-					ctx->label_names ? "Time" :
-					ctx->xlabel, ctx->value);
+					ctx->label_names ? "Time" : ctx->xlabel,
+					ctx->value);
 			for (i = 0; i < num_channels; i++) {
 				g_string_append_printf(*out, "%s%s",
 					ctx->channels[i].label, ctx->value);
@@ -442,7 +452,6 @@ static void dump_saved_values(struct context *ctx, GString **out)
 			ctx->previous_sample = g_malloc0(analog_size + ctx->num_logic_channels);
 
 		for (i = 0; i < ctx->num_samples; i++) {
-			ctx->sample_time += ctx->period;
 			analog_sample =
 			    &ctx->analog_samples[i * ctx->num_analog_channels];
 			logic_sample =
@@ -464,9 +473,16 @@ static void dump_saved_values(struct context *ctx, GString **out)
 				       analog_sample, analog_size);
 			}
 
-			if (ctx->time)
+			if (ctx->time && !ctx->sample_rate) {
+				g_string_append_printf(*out, "0%s", ctx->value);
+			} else if (ctx->time) {
+				sample_time_dbl = ctx->out_sample_count++;
+				sample_time_dbl /= ctx->sample_rate;
+				sample_time_dbl *= ctx->sample_scale;
+				sample_time_u64 = sample_time_dbl;
 				g_string_append_printf(*out, "%" PRIu64 "%s",
-					ctx->sample_time, ctx->value);
+					sample_time_u64, ctx->value);
+			}
 
 			for (j = 0; j < num_channels; j++) {
 				if (ctx->channels[j].ch->type == SR_CHANNEL_ANALOG) {
@@ -559,10 +575,91 @@ static void save_gnuplot(struct context *ctx)
 	g_string_free(script, TRUE);
 }
 
+static void check_input_constraints(struct context *ctx)
+{
+	size_t snum_count, snum_warn_limit;
+	size_t logic, analog;
+	gboolean has_frames, is_short, is_mixed, is_multi_analog;
+	gboolean do_warn;
+
+	/*
+	 * Check and conditionally warn exactly once during execution
+	 * of the output module on a set of input data.
+	 */
+	if (ctx->have_checked)
+		return;
+	ctx->have_checked = TRUE;
+
+	/*
+	 * This implementation of the CSV output module assumes some
+	 * constraints which need not be met in reality. Emit warnings
+	 * until a better version becomes available. Letting users know
+	 * that their request may not get processed correctly is the
+	 * only thing we can do for now except for complete refusal to
+	 * process the input data.
+	 *
+	 * What the implementation appears to assume (unverified, this
+	 * interpretation may be incorrect and/or incomplete):
+	 * - Multi-channel analog data, or mixed signal input, always
+	 *   is enclosed in frame markers.
+	 * - Data which gets received across several packets spans a
+	 *   consistent sample number range. All samples of one frame
+	 *   and channel number or data type fit into a single packet.
+	 *   Arbitrary chunking seems to not be supported.
+	 * - A specific order of analog data packets is assumed.
+	 *
+	 * With these assumptions encoded in the implementation, and
+	 * not being met at runtime, incorrect and unexpected results
+	 * were seen for these configurations:
+	 * - More than one analog channel.
+	 * - The combination of logic and analog channel types.
+	 *
+	 * The condition of frames with large sample counts is a wild
+	 * guess, the limit is a totally arbitrary choice. It assumes
+	 * typical scope frames with at most a few thousand samples per
+	 * frame, and assumes that a channel's data gets sent in large
+	 * enough packets. The absence of a warning message does not
+	 * necessarily translate to correct output, it's more of a rate
+	 * limiting approach to not scare users too much.
+	 */
+	snum_count = ctx->pkt_snums;
+	snum_warn_limit = 1 * 1000 * 1000;
+	logic = ctx->num_logic_channels;
+	analog = ctx->num_analog_channels;
+	has_frames = ctx->have_frames;
+	is_short = snum_count < snum_warn_limit;
+	is_mixed = logic && analog;
+	is_multi_analog = analog > 1;
+
+	if (has_frames && is_short) {
+		sr_info("Assuming consistent framed input data.");
+		return;
+	}
+
+	do_warn = FALSE;
+	if (has_frames) {
+		sr_warn("Untested configuration: large frame content.");
+		do_warn = TRUE;
+	}
+	if (is_mixed) {
+		sr_warn("Untested configuration: mixed signal input data.");
+		do_warn = TRUE;
+	}
+	if (is_multi_analog) {
+		sr_warn("Untested configuration: multi-channel analog data.");
+		do_warn = TRUE;
+	}
+	if (!do_warn)
+		return;
+	sr_warn("Resulting CSV output data may be incomplete or incorrect.");
+}
+
 static int receive(const struct sr_output *o,
 		   const struct sr_datafeed_packet *packet, GString **out)
 {
 	struct context *ctx;
+	const struct sr_datafeed_logic *logic;
+	const struct sr_datafeed_analog *analog;
 
 	*out = NULL;
 	if (!o || !o->sdi)
@@ -573,18 +670,32 @@ static int receive(const struct sr_output *o,
 	sr_dbg("Got packet of type %d", packet->type);
 	switch (packet->type) {
 	case SR_DF_HEADER:
+		ctx->have_checked = FALSE;
+		ctx->have_frames = FALSE;
+		ctx->pkt_snums = FALSE;
 		*out = gen_header(o, packet->payload);
 		break;
 	case SR_DF_TRIGGER:
 		ctx->trigger = TRUE;
 		break;
 	case SR_DF_LOGIC:
-		process_logic(ctx, packet->payload);
+		*out = g_string_sized_new(512);
+		logic = packet->payload;
+		ctx->pkt_snums = logic->length;
+		ctx->pkt_snums /= logic->length;
+		check_input_constraints(ctx);
+		process_logic(ctx, logic);
 		break;
 	case SR_DF_ANALOG:
-		process_analog(ctx, packet->payload);
+		*out = g_string_sized_new(512);
+		analog = packet->payload;
+		ctx->pkt_snums = analog->num_samples;
+		ctx->pkt_snums /= g_slist_length(analog->meaning->channels);
+		check_input_constraints(ctx);
+		process_analog(ctx, analog);
 		break;
 	case SR_DF_FRAME_BEGIN:
+		ctx->have_frames = TRUE;
 		*out = g_string_new(ctx->frame);
 		/* Fallthrough */
 	case SR_DF_END:
