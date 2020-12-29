@@ -476,6 +476,23 @@ static inline void write_u32le(uint8_t *p, uint32_t x)
 #define WL32(p, x) write_u32le((uint8_t *)(p), (uint32_t)(x))
 
 /**
+ * Write a 64 bits unsigned integer to memory stored as big endian.
+ * @param p a pointer to the output memory
+ * @param x the input unsigned integer
+ */
+static inline void write_u64be(uint8_t *p, uint64_t x)
+{
+	p[7] = x & 0xff; x >>= 8;
+	p[6] = x & 0xff; x >>= 8;
+	p[5] = x & 0xff; x >>= 8;
+	p[4] = x & 0xff; x >>= 8;
+	p[3] = x & 0xff; x >>= 8;
+	p[2] = x & 0xff; x >>= 8;
+	p[1] = x & 0xff; x >>= 8;
+	p[0] = x & 0xff; x >>= 8;
+}
+
+/**
  * Write a 64 bits unsigned integer to memory stored as little endian.
  * @param p a pointer to the output memory
  * @param x the input unsigned integer
@@ -950,6 +967,15 @@ static inline void write_dblle_inc(uint8_t **p, double x)
 #define SR_DRIVER_LIST_SECTION "__sr_driver_list"
 #endif
 
+#if !defined SR_DRIVER_LIST_NOREORDER && defined __has_attribute
+#if __has_attribute(no_reorder)
+#define SR_DRIVER_LIST_NOREORDER __attribute__((no_reorder))
+#endif
+#endif
+#if !defined SR_DRIVER_LIST_NOREORDER
+#define SR_DRIVER_LIST_NOREORDER /* EMPTY */
+#endif
+
 /**
  * Register a list of hardware drivers.
  *
@@ -979,6 +1005,7 @@ static inline void write_dblle_inc(uint8_t **p, double x)
  */
 #define SR_REGISTER_DEV_DRIVER_LIST(name, ...) \
 	static const struct sr_dev_driver *name[] \
+		SR_DRIVER_LIST_NOREORDER \
 		__attribute__((section (SR_DRIVER_LIST_SECTION), used, \
 			aligned(sizeof(struct sr_dev_driver *)))) \
 		= { \
@@ -1782,10 +1809,12 @@ SR_PRIV void *sr_resource_load(struct sr_context *ctx, int type,
 
 SR_PRIV int sr_atol(const char *str, long *ret);
 SR_PRIV int sr_atol_base(const char *str, long *ret, char **end, int base);
+SR_PRIV int sr_atoul_base(const char *str, unsigned long *ret, char **end, int base);
 SR_PRIV int sr_atoi(const char *str, int *ret);
 SR_PRIV int sr_atod(const char *str, double *ret);
 SR_PRIV int sr_atof(const char *str, float *ret);
 SR_PRIV int sr_atod_ascii(const char *str, double *ret);
+SR_PRIV int sr_atod_ascii_digits(const char *str, double *ret, int *digits);
 SR_PRIV int sr_atof_ascii(const char *str, float *ret);
 
 SR_PRIV GString *sr_hexdump_new(const uint8_t *data, const size_t len);
@@ -1823,6 +1852,8 @@ enum {
 };
 
 typedef gboolean (*packet_valid_callback)(const uint8_t *buf);
+typedef int (*packet_valid_len_callback)(void *st,
+	const uint8_t *p, size_t l, size_t *pl);
 
 typedef GSList *(*sr_ser_list_append_t)(GSList *devs, const char *name,
 		const char *desc);
@@ -1852,10 +1883,10 @@ SR_PRIV int serial_set_paramstr(struct sr_serial_dev_inst *serial,
 SR_PRIV int serial_readline(struct sr_serial_dev_inst *serial, char **buf,
 		int *buflen, gint64 timeout_ms);
 SR_PRIV int serial_stream_detect(struct sr_serial_dev_inst *serial,
-				 uint8_t *buf, size_t *buflen,
-				 size_t packet_size,
-				 packet_valid_callback is_valid,
-				 uint64_t timeout_ms);
+		uint8_t *buf, size_t *buflen,
+		size_t packet_size, packet_valid_callback is_valid,
+		packet_valid_len_callback is_valid_len, size_t *return_size,
+		uint64_t timeout_ms);
 SR_PRIV int sr_serial_extract_options(GSList *options, const char **serial_device,
 				      const char **serial_options);
 SR_PRIV int serial_source_add(struct sr_session *session,
@@ -2341,10 +2372,42 @@ struct brymen_bm52x_info { size_t ch_idx; };
 
 #ifdef HAVE_SERIAL_COMM
 SR_PRIV int sr_brymen_bm52x_packet_request(struct sr_serial_dev_inst *serial);
+SR_PRIV int sr_brymen_bm82x_packet_request(struct sr_serial_dev_inst *serial);
 #endif
 SR_PRIV gboolean sr_brymen_bm52x_packet_valid(const uint8_t *buf);
+SR_PRIV gboolean sr_brymen_bm82x_packet_valid(const uint8_t *buf);
+/* BM520s and BM820s protocols are similar, the parse routine is shared. */
 SR_PRIV int sr_brymen_bm52x_parse(const uint8_t *buf, float *floatval,
 		struct sr_datafeed_analog *analog, void *info);
+
+struct brymen_bm52x_state;
+
+SR_PRIV void *brymen_bm52x_state_init(void);
+SR_PRIV void brymen_bm52x_state_free(void *state);
+SR_PRIV int brymen_bm52x_config_get(void *state, uint32_t key, GVariant **data,
+	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg);
+SR_PRIV int brymen_bm52x_config_set(void *state, uint32_t key, GVariant *data,
+	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg);
+SR_PRIV int brymen_bm52x_config_list(void *state, uint32_t key, GVariant **data,
+	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg);
+SR_PRIV int brymen_bm52x_acquire_start(void *state,
+	const struct sr_dev_inst *sdi,
+	sr_receive_data_callback *cb, void **cb_data);
+
+/*--- dmm/bm85x.c -----------------------------------------------------------*/
+
+#define BRYMEN_BM85x_PACKET_SIZE_MIN 4
+
+struct brymen_bm85x_info { int dummy; };
+
+#ifdef HAVE_SERIAL_COMM
+SR_PRIV int brymen_bm85x_after_open(struct sr_serial_dev_inst *serial);
+SR_PRIV int brymen_bm85x_packet_request(struct sr_serial_dev_inst *serial);
+#endif
+SR_PRIV gboolean brymen_bm85x_packet_valid(void *state,
+	const uint8_t *buf, size_t len, size_t *pkt_len);
+SR_PRIV int brymen_bm85x_parse(void *state, const uint8_t *buf, size_t len,
+	double *floatval, struct sr_datafeed_analog *analog, void *info);
 
 /*--- dmm/bm86x.c -----------------------------------------------------------*/
 

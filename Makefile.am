@@ -27,7 +27,7 @@ DISTCHECK_CONFIGURE_FLAGS = --disable-python
 
 FIRMWARE_DIR = $(datadir)/sigrok-firmware
 
-local_includes = -Iinclude -I$(srcdir)/include -I$(srcdir)/src -I.
+local_includes = -Iinclude -I$(srcdir)/include -I$(srcdir)/src -I. @RPC_CFLAGS@
 if BINDINGS_CXX
 local_includes += -Ibindings/cxx/include -I$(srcdir)/bindings/cxx/include -Ibindings/cxx
 endif
@@ -166,6 +166,7 @@ libsigrok_la_SOURCES += \
 	src/dmm/asycii.c \
 	src/dmm/bm25x.c \
 	src/dmm/bm52x.c \
+	src/dmm/bm85x.c \
 	src/dmm/bm86x.c \
 	src/dmm/dtm0660.c \
 	src/dmm/eev121gw.c \
@@ -258,13 +259,6 @@ src_libdrivers_la_SOURCES += \
 	src/hardware/beaglelogic/api.c \
 	src/hardware/beaglelogic/beaglelogic_native.c \
 	src/hardware/beaglelogic/beaglelogic_tcp.c
-endif
-if HW_BRYMEN_DMM
-src_libdrivers_la_SOURCES += \
-	src/hardware/brymen-dmm/parser.c \
-	src/hardware/brymen-dmm/protocol.h \
-	src/hardware/brymen-dmm/protocol.c \
-	src/hardware/brymen-dmm/api.c
 endif
 if HW_CEM_DT_885X
 src_libdrivers_la_SOURCES += \
@@ -415,6 +409,12 @@ src_libdrivers_la_SOURCES += \
 	src/hardware/ipdbg-la/protocol.h \
 	src/hardware/ipdbg-la/protocol.c \
 	src/hardware/ipdbg-la/api.c
+endif
+if HW_ITECH_IT8500
+src_libdrivers_la_SOURCES += \
+	src/hardware/itech-it8500/protocol.h \
+	src/hardware/itech-it8500/protocol.c \
+	src/hardware/itech-it8500/api.c
 endif
 if HW_KECHENG_KC_330B
 src_libdrivers_la_SOURCES += \
