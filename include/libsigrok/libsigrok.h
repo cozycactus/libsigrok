@@ -80,6 +80,13 @@ enum sr_error_code {
 	/* Update sr_strerror()/sr_strerror_name() (error.c) upon changes! */
 };
 
+/** Ternary return type for DMM/LCR/etc packet parser validity checks. */
+enum sr_valid_code {
+	SR_PACKET_INVALID = -1,	/**< Certainly invalid. */
+	SR_PACKET_VALID = 0,	/**< Certainly valid. */
+	SR_PACKET_NEED_RX = +1,	/**< Need more RX data. */
+};
+
 #define SR_MAX_CHANNELNAME_LEN 32
 
 /* Handy little macros */
@@ -1046,6 +1053,29 @@ enum sr_configkey {
 
 	/** Duty cycle of a source signal. */
 	SR_CONF_DUTY_CYCLE,
+
+	/**
+	 * Current power.
+	 * @arg type: double
+	 * @arg get: get measured power
+	 */
+	SR_CONF_POWER,
+
+	/**
+	 * Power target.
+	 * @arg type: double
+	 * @arg get: get power target
+	 * @arg set: change power target
+	 */
+	SR_CONF_POWER_TARGET,
+
+	/**
+	 * Resistance target.
+	 * @arg type: double
+	 * @arg get: get resistance target
+	 * @arg set: change resistance target
+	 */
+	SR_CONF_RESISTANCE_TARGET,
 
 	/* Update sr_key_info_config[] (hwdriver.c) upon changes! */
 

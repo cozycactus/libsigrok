@@ -188,13 +188,25 @@ AS_CASE([$host_os], [mingw*], [SR_PREPEND([SR_EXTRA_LIBS], [-lws2_32])])
 SR_SEARCH_LIBS([SR_EXTRA_LIBS], [pow], [m])
 
 # RPC is only needed for VXI support.
-AC_CACHE_CHECK([for RPC support], [sr_cv_have_rpc],
+AC_CACHE_CHECK([for SunRPC support], [sr_cv_have_sunrpc],
 	[AC_LINK_IFELSE([AC_LANG_PROGRAM(
 			[[#include <rpc/rpc.h>]m4_newline[CLIENT *rpc_test(void);]],
 			[[(void) clnt_create("", 0, 0, "");]])],
-		[sr_cv_have_rpc=yes], [sr_cv_have_rpc=no])])
+		[RPC_CFLAGS=""; RPC_LIBS=""; sr_cv_have_sunrpc=yes],
+		[sr_cv_have_sunrpc=no])])
+PKG_CHECK_MODULES([TIRPC],
+	[libtirpc],
+	[RPC_CFLAGS=$TIRPC_CFLAGS; SR_PREPEND([SR_EXTRA_LIBS], [$TIRPC_LIBS]); sr_cv_have_tirpc=yes],
+	[sr_cv_have_tirpc=no])
+AS_IF([test "x$sr_cv_have_sunrpc" = xyes -o "x$sr_cv_have_tirpc" = xyes],
+	[sr_cv_have_rpc=yes], [sr_cv_have_rpc=no])
+
+AC_SUBST(RPC_CFLAGS)
+AC_SUBST(RPC_LIBS)
+
 AS_IF([test "x$sr_cv_have_rpc" = xyes],
-	[AC_DEFINE([HAVE_RPC], [1], [Specifies whether we have RPC support.])])
+	[AC_DEFINE([HAVE_RPC], [1], [Specifies whether we have RPC support (either by SunRPC or libtirpc).])])
+
 # VXI support is only compiled if RPC support was found.
 AM_CONDITIONAL([NEED_RPC], [test "x$sr_cv_have_rpc" = xyes])
 
@@ -252,7 +264,6 @@ SR_DRIVER([ASIX SIGMA/SIGMA2], [asix-sigma], [libftdi])
 SR_DRIVER([Atten PPS3xxx], [atten-pps3xxx], [serial_comm])
 SR_DRIVER([BayLibre ACME], [baylibre-acme], [sys_timerfd_h])
 SR_DRIVER([BeagleLogic], [beaglelogic], [sys_mman_h sys_ioctl_h])
-SR_DRIVER([Brymen DMM], [brymen-dmm], [serial_comm])
 SR_DRIVER([CEM DT-885x], [cem-dt-885x], [serial_comm])
 SR_DRIVER([Center 3xx], [center-3xx], [serial_comm])
 SR_DRIVER([ChronoVu LA], [chronovu-la], [libusb libftdi])
@@ -277,6 +288,7 @@ SR_DRIVER([Hung-Chang DSO-2100], [hung-chang-dso-2100], [libieee1284])
 SR_DRIVER([Ikalogic Scanalogic-2], [ikalogic-scanalogic2], [libusb])
 SR_DRIVER([Ikalogic Scanaplus], [ikalogic-scanaplus], [libftdi])
 SR_DRIVER([IPDBG LA], [ipdbg-la])
+SR_DRIVER([ITECH IT8500], [itech-it8500], [serial_comm])
 SR_DRIVER([Kecheng KC-330B], [kecheng-kc-330b], [libusb])
 SR_DRIVER([KERN scale], [kern-scale], [serial_comm])
 SR_DRIVER([Kingst LA2016], [kingst-la2016], [libusb])
@@ -642,6 +654,8 @@ Enabled serial communication transports:
 
 Enabled SCPI backends:
  - TCP............................. yes
+ - SunRPC ......................... $sr_cv_have_sunrpc
+ - TI-RPC ......................... $sr_cv_have_tirpc
  - RPC............................. $sr_cv_have_rpc
  - serial.......................... $sr_have_serial_comm
  - VISA............................ $sr_have_librevisa
