@@ -76,8 +76,9 @@
 #define CMD_START_FLAGS_CLK_30MHZ	(0 << CMD_START_FLAGS_CLK_SRC_POS)
 #define CMD_START_FLAGS_CLK_48MHZ	(1 << CMD_START_FLAGS_CLK_SRC_POS)
 #define CMD_START_FLAGS_CLK_192MHZ	(2 << CMD_START_FLAGS_CLK_SRC_POS)
+#define CMD_START_FLAGS_CLK_80MHZ	(3 << CMD_START_FLAGS_CLK_SRC_POS)
 
-#define FX3LAFW_MAX_SAMPLE_BYTES_PER_SEC	SR_MHZ(256)
+#define FX3LAFW_MAX_SAMPLE_BYTES_PER_SEC	SR_MHZ(320)
 
 static inline int fx3lafw_get_samplerate_params(uint64_t samplerate,
 		uint8_t *clock_flag, uint16_t *sample_delay)
@@ -88,6 +89,7 @@ static inline int fx3lafw_get_samplerate_params(uint64_t samplerate,
 	} clocks[] = {
 		{ SR_MHZ(48), CMD_START_FLAGS_CLK_48MHZ },
 		{ SR_MHZ(30), CMD_START_FLAGS_CLK_30MHZ },
+		{ SR_MHZ(80), CMD_START_FLAGS_CLK_80MHZ },
 		{ SR_MHZ(192), CMD_START_FLAGS_CLK_192MHZ },
 	};
 	uint64_t divisor;
