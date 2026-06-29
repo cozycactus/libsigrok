@@ -45,10 +45,30 @@ struct acquisition_status {
 	uint32_t pib_error;
 	uint32_t pib_sck0_status;
 	uint32_t pib_sck0_intr;
+	uint32_t pib_sck0_dscr;
+	uint32_t pib_sck0_count;
 	uint32_t pib_sck1_status;
 	uint32_t pib_sck1_intr;
+	uint32_t pib_sck1_dscr;
+	uint32_t pib_sck1_count;
 	uint32_t uib_sck2_status;
 	uint32_t uib_sck2_intr;
+	uint32_t uib_sck2_dscr;
+	uint32_t uib_sck2_count;
+	uint32_t pause_count;
+	uint8_t pause_gpif_stat;
+	uint8_t pause_gpif_state;
+	uint16_t pause_reserved;
+	uint32_t pause_gpif_status;
+	uint32_t pause_pib_sck0_status;
+	uint32_t pause_pib_sck0_dscr;
+	uint32_t pause_pib_sck0_count;
+	uint32_t pause_pib_sck1_status;
+	uint32_t pause_pib_sck1_dscr;
+	uint32_t pause_pib_sck1_count;
+	uint32_t pause_uib_sck2_status;
+	uint32_t pause_uib_sck2_dscr;
+	uint32_t pause_uib_sck2_count;
 };
 
 #pragma pack(pop)
@@ -423,12 +443,33 @@ static void log_acquisition_status(const struct acquisition_status *status)
 		status->gpif_stat, status->gpif_state, status->gpif_status,
 		status->gpif_intr, status->pib_intr, status->pib_error);
 	sr_err("DMA status: pib0 status=0x%08" PRIx32
-		" intr=0x%08" PRIx32 " pib1 status=0x%08" PRIx32
-		" intr=0x%08" PRIx32 " uib2 status=0x%08" PRIx32
-		" intr=0x%08" PRIx32 ".",
+		" intr=0x%08" PRIx32 " dscr=0x%08" PRIx32
+		" count=0x%08" PRIx32 " pib1 status=0x%08" PRIx32
+		" intr=0x%08" PRIx32 " dscr=0x%08" PRIx32
+		" count=0x%08" PRIx32 " uib2 status=0x%08" PRIx32
+		" intr=0x%08" PRIx32 " dscr=0x%08" PRIx32
+		" count=0x%08" PRIx32 ".",
 		status->pib_sck0_status, status->pib_sck0_intr,
+		status->pib_sck0_dscr, status->pib_sck0_count,
 		status->pib_sck1_status, status->pib_sck1_intr,
-		status->uib_sck2_status, status->uib_sck2_intr);
+		status->pib_sck1_dscr, status->pib_sck1_count,
+		status->uib_sck2_status, status->uib_sck2_intr,
+		status->uib_sck2_dscr, status->uib_sck2_count);
+	sr_err("Pause snapshot: count=%" PRIu32 " gpif_stat=%u gpif_state=%u"
+		" gpif_status=0x%08" PRIx32
+		" pib0 status=0x%08" PRIx32 " dscr=0x%08" PRIx32
+		" count=0x%08" PRIx32 " pib1 status=0x%08" PRIx32
+		" dscr=0x%08" PRIx32 " count=0x%08" PRIx32
+		" uib2 status=0x%08" PRIx32 " dscr=0x%08" PRIx32
+		" count=0x%08" PRIx32 ".",
+		status->pause_count, status->pause_gpif_stat,
+		status->pause_gpif_state, status->pause_gpif_status,
+		status->pause_pib_sck0_status, status->pause_pib_sck0_dscr,
+		status->pause_pib_sck0_count,
+		status->pause_pib_sck1_status, status->pause_pib_sck1_dscr,
+		status->pause_pib_sck1_count,
+		status->pause_uib_sck2_status, status->pause_uib_sck2_dscr,
+		status->pause_uib_sck2_count);
 }
 
 static void LIBUSB_CALL receive_status_transfer(struct libusb_transfer *transfer)
