@@ -2029,6 +2029,9 @@ SR_PRIV int logic_channel_unitsize(GSList *channels);
 SR_PRIV struct soft_trigger_logic *soft_trigger_logic_new(
 		const struct sr_dev_inst *sdi, struct sr_trigger *trigger,
 		int pre_trigger_samples);
+SR_PRIV struct soft_trigger_logic *soft_trigger_logic_new_with_unitsize(
+		const struct sr_dev_inst *sdi, struct sr_trigger *trigger,
+		int pre_trigger_samples, int unitsize);
 SR_PRIV void soft_trigger_logic_free(struct soft_trigger_logic *st);
 SR_PRIV int soft_trigger_logic_check(struct soft_trigger_logic *st, uint8_t *buf,
 		int len, int *pre_trigger_samples);

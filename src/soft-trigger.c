@@ -41,16 +41,19 @@ SR_PRIV int logic_channel_unitsize(GSList *channels)
 	return (number + 7) / 8;
 }
 
-SR_PRIV struct soft_trigger_logic *soft_trigger_logic_new(
+SR_PRIV struct soft_trigger_logic *soft_trigger_logic_new_with_unitsize(
 		const struct sr_dev_inst *sdi, struct sr_trigger *trigger,
-		int pre_trigger_samples)
+		int pre_trigger_samples, int unitsize)
 {
 	struct soft_trigger_logic *stl;
+
+	if (unitsize <= 0)
+		return NULL;
 
 	stl = g_malloc0(sizeof(struct soft_trigger_logic));
 	stl->sdi = sdi;
 	stl->trigger = trigger;
-	stl->unitsize = logic_channel_unitsize(sdi->channels);
+	stl->unitsize = unitsize;
 	stl->prev_sample = g_malloc0(stl->unitsize);
 	stl->pre_trigger_size = stl->unitsize * pre_trigger_samples;
 	stl->pre_trigger_buffer = g_try_malloc(stl->pre_trigger_size);
@@ -71,6 +74,14 @@ SR_PRIV struct soft_trigger_logic *soft_trigger_logic_new(
 	}
 
 	return stl;
+}
+
+SR_PRIV struct soft_trigger_logic *soft_trigger_logic_new(
+		const struct sr_dev_inst *sdi, struct sr_trigger *trigger,
+		int pre_trigger_samples)
+{
+	return soft_trigger_logic_new_with_unitsize(sdi, trigger,
+		pre_trigger_samples, logic_channel_unitsize(sdi->channels));
 }
 
 SR_PRIV void soft_trigger_logic_free(struct soft_trigger_logic *stl)

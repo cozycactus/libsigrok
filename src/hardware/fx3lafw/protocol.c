@@ -167,11 +167,16 @@ static int command_start_acquisition(const struct sr_dev_inst *sdi)
 	devc = sdi->priv;
 	usb = sdi->conn;
 
-	if ((ret = fx3lafw_get_samplerate_params(devc->cur_samplerate,
-			&clock_flag, &sample_delay)) != SR_OK) {
-		sr_err("Unable to sample at %" PRIu64 "Hz.",
-			devc->cur_samplerate);
-		return ret;
+	if (devc->external_clock) {
+		clock_flag = CMD_START_FLAGS_CLK_192MHZ;
+		sample_delay = 0;
+	} else {
+		if ((ret = fx3lafw_get_samplerate_params(devc->cur_samplerate,
+				&clock_flag, &sample_delay)) != SR_OK) {
+			sr_err("Unable to sample at %" PRIu64 "Hz.",
+				devc->cur_samplerate);
+			return ret;
+		}
 	}
 
 	memset(&cmd, 0, sizeof(cmd));
@@ -196,9 +201,20 @@ static int command_start_acquisition(const struct sr_dev_inst *sdi)
 		return SR_ERR_BUG;
 	}
 
+	if (devc->external_clock) {
+		cmd.flags |= CMD_START_FLAGS_EXT_CLOCK;
+		if (devc->clock_edge == FX3LAFW_CLOCK_EDGE_FALLING)
+			cmd.flags |= CMD_START_FLAGS_CLK_INVERT;
+	}
+
 	sr_dbg("Starting acquisition: samplerate=%" PRIu64
-		", unitsize=%" PRIu8 ", delay=%" PRIu16 ", flags=0x%02x.",
-		devc->cur_samplerate, devc->unitsize, sample_delay, cmd.flags);
+		", unitsize=%" PRIu8 ", delay=%" PRIu16
+		", external_clock=%d, clock_edge=%s, flags=0x%02x.",
+		devc->cur_samplerate, devc->unitsize, sample_delay,
+		devc->external_clock,
+		devc->clock_edge == FX3LAFW_CLOCK_EDGE_FALLING ?
+			"falling" : "rising",
+		cmd.flags);
 
 	ret = libusb_control_transfer(usb->devhdl, LIBUSB_REQUEST_TYPE_VENDOR |
 		LIBUSB_ENDPOINT_OUT, CMD_START, 0x0000, 0x0000,
@@ -331,6 +347,8 @@ SR_PRIV struct dev_context *fx3lafw_dev_new(void)
 	devc->limit_frames = 1;
 	devc->limit_samples = 0;
 	devc->capture_ratio = 0;
+	devc->external_clock = FALSE;
+	devc->clock_edge = FX3LAFW_CLOCK_EDGE_RISING;
 	devc->unitsize = 1;
 	devc->stl = NULL;
 
@@ -752,8 +770,8 @@ static int start_transfers(const struct sr_dev_inst *sdi)
 		if (devc->limit_samples > 0)
 			pre_trigger_samples = (devc->capture_ratio *
 				devc->limit_samples) / 100;
-		devc->stl = soft_trigger_logic_new(sdi, trigger,
-			pre_trigger_samples);
+		devc->stl = soft_trigger_logic_new_with_unitsize(sdi, trigger,
+			pre_trigger_samples, devc->unitsize);
 		if (!devc->stl)
 			return SR_ERR_MALLOC;
 		devc->trigger_fired = FALSE;
