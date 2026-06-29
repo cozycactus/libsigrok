@@ -114,10 +114,16 @@ static inline int fx3lafw_get_samplerate_params(uint64_t samplerate,
 
 static inline uint64_t fx3lafw_max_samplerate_for_unitsize(uint8_t unitsize)
 {
-	if (unitsize == 0)
+	switch (unitsize) {
+	case 1:
+	case 2:
+		return FX3LAFW_MAX_SAMPLE_BYTES_PER_SEC / unitsize;
+	case 3:
+	case 4:
+		return SR_MHZ(80);
+	default:
 		return 0;
-
-	return FX3LAFW_MAX_SAMPLE_BYTES_PER_SEC / unitsize;
+	}
 }
 
 static inline gboolean fx3lafw_samplerate_supported_for_unitsize(
