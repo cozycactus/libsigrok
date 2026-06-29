@@ -369,6 +369,28 @@ static void resubmit_transfer(struct libusb_transfer *transfer)
 	free_transfer(transfer);
 }
 
+static const char *transfer_status_name(enum libusb_transfer_status status)
+{
+	switch (status) {
+	case LIBUSB_TRANSFER_COMPLETED:
+		return "COMPLETED";
+	case LIBUSB_TRANSFER_ERROR:
+		return "ERROR";
+	case LIBUSB_TRANSFER_TIMED_OUT:
+		return "TIMED_OUT";
+	case LIBUSB_TRANSFER_CANCELLED:
+		return "CANCELLED";
+	case LIBUSB_TRANSFER_STALL:
+		return "STALL";
+	case LIBUSB_TRANSFER_NO_DEVICE:
+		return "NO_DEVICE";
+	case LIBUSB_TRANSFER_OVERFLOW:
+		return "OVERFLOW";
+	default:
+		return "UNKNOWN";
+	}
+}
+
 static void send_logic_data(struct sr_dev_inst *sdi, uint8_t *data,
 		size_t length, size_t sample_width)
 {
@@ -405,7 +427,7 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer)
 	}
 
 	sr_dbg("receive_transfer(): status %s received %d bytes.",
-		libusb_error_name(transfer->status), transfer->actual_length);
+		transfer_status_name(transfer->status), transfer->actual_length);
 
 	unitsize = devc->unitsize;
 	cur_sample_count = transfer->actual_length / unitsize;
@@ -428,8 +450,11 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer)
 		devc->empty_transfer_count++;
 		if (devc->empty_transfer_count > MAX_EMPTY_TRANSFERS) {
 			sr_err("Aborting acquisition after %d empty/error USB "
-				"transfers; requested data was not fully "
-				"received.", devc->empty_transfer_count);
+				"transfers; last transfer status %s, "
+				"actual_length %d; requested data was not fully "
+				"received.", devc->empty_transfer_count,
+				transfer_status_name(transfer->status),
+				transfer->actual_length);
 			fx3lafw_abort_acquisition(devc);
 			free_transfer(transfer);
 		} else {
