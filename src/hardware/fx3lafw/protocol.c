@@ -135,61 +135,6 @@ static int command_stop_acquisition(const struct sr_dev_inst *sdi)
 	return SR_OK;
 }
 
-static int command_get_acquisition_status(const struct sr_dev_inst *sdi,
-		struct acquisition_status *status)
-{
-	struct sr_usb_dev_inst *usb;
-	int ret;
-
-	if (!sdi || !sdi->conn || !status)
-		return SR_ERR_ARG;
-
-	usb = sdi->conn;
-	if (!usb->devhdl)
-		return SR_ERR_ARG;
-
-	ret = libusb_control_transfer(usb->devhdl, LIBUSB_REQUEST_TYPE_VENDOR |
-		LIBUSB_ENDPOINT_IN, CMD_GET_ACQ_STATUS, 0x0000, 0x0000,
-		(unsigned char *)status, sizeof(*status), USB_TIMEOUT);
-	if (ret < 0) {
-		if (ret == LIBUSB_ERROR_PIPE) {
-			sr_dbg("Firmware does not support acquisition status command.");
-			return SR_ERR_NA;
-		}
-		sr_warn("Unable to get acquisition status: %s.",
-			libusb_error_name(ret));
-		return SR_ERR;
-	}
-	if (ret != sizeof(*status)) {
-		sr_warn("Short acquisition status response: %d/%zu bytes.",
-			ret, sizeof(*status));
-		return SR_ERR;
-	}
-
-	return SR_OK;
-}
-
-static void log_acquisition_status(const struct sr_dev_inst *sdi)
-{
-	struct acquisition_status status;
-
-	if (command_get_acquisition_status(sdi, &status) != SR_OK)
-		return;
-
-	sr_err("Acquisition status: gpif_stat=%u gpif_state=%u "
-		"gpif_status=0x%08" PRIx32 " gpif_intr=0x%08" PRIx32
-		" pib_intr=0x%08" PRIx32 " pib_error=0x%08" PRIx32 ".",
-		status.gpif_stat, status.gpif_state, status.gpif_status,
-		status.gpif_intr, status.pib_intr, status.pib_error);
-	sr_err("DMA status: pib0 status=0x%08" PRIx32
-		" intr=0x%08" PRIx32 " pib1 status=0x%08" PRIx32
-		" intr=0x%08" PRIx32 " uib2 status=0x%08" PRIx32
-		" intr=0x%08" PRIx32 ".",
-		status.pib_sck0_status, status.pib_sck0_intr,
-		status.pib_sck1_status, status.pib_sck1_intr,
-		status.uib_sck2_status, status.uib_sck2_intr);
-}
-
 static int command_start_acquisition(const struct sr_dev_inst *sdi)
 {
 	struct dev_context *devc;
@@ -403,6 +348,15 @@ static void finish_acquisition(struct sr_dev_inst *sdi)
 	}
 }
 
+static void maybe_finish_acquisition(struct sr_dev_inst *sdi)
+{
+	struct dev_context *devc;
+
+	devc = sdi->priv;
+	if (devc->submitted_transfers == 0 && !devc->status_transfer)
+		finish_acquisition(sdi);
+}
+
 static void free_transfer(struct libusb_transfer *transfer)
 {
 	struct sr_dev_inst *sdi;
@@ -424,8 +378,7 @@ static void free_transfer(struct libusb_transfer *transfer)
 	}
 
 	devc->submitted_transfers--;
-	if (devc->submitted_transfers == 0)
-		finish_acquisition(sdi);
+	maybe_finish_acquisition(sdi);
 }
 
 static void resubmit_transfer(struct libusb_transfer *transfer)
@@ -460,6 +413,97 @@ static const char *transfer_status_name(enum libusb_transfer_status status)
 	default:
 		return "UNKNOWN";
 	}
+}
+
+static void log_acquisition_status(const struct acquisition_status *status)
+{
+	sr_err("Acquisition status: gpif_stat=%u gpif_state=%u "
+		"gpif_status=0x%08" PRIx32 " gpif_intr=0x%08" PRIx32
+		" pib_intr=0x%08" PRIx32 " pib_error=0x%08" PRIx32 ".",
+		status->gpif_stat, status->gpif_state, status->gpif_status,
+		status->gpif_intr, status->pib_intr, status->pib_error);
+	sr_err("DMA status: pib0 status=0x%08" PRIx32
+		" intr=0x%08" PRIx32 " pib1 status=0x%08" PRIx32
+		" intr=0x%08" PRIx32 " uib2 status=0x%08" PRIx32
+		" intr=0x%08" PRIx32 ".",
+		status->pib_sck0_status, status->pib_sck0_intr,
+		status->pib_sck1_status, status->pib_sck1_intr,
+		status->uib_sck2_status, status->uib_sck2_intr);
+}
+
+static void LIBUSB_CALL receive_status_transfer(struct libusb_transfer *transfer)
+{
+	struct sr_dev_inst *sdi;
+	struct dev_context *devc;
+	struct acquisition_status *status;
+
+	sdi = transfer->user_data;
+	devc = sdi->priv;
+
+	if (transfer->status == LIBUSB_TRANSFER_COMPLETED &&
+			transfer->actual_length == sizeof(*status)) {
+		status = (struct acquisition_status *)
+			libusb_control_transfer_get_data(transfer);
+		log_acquisition_status(status);
+	} else {
+		sr_err("Acquisition status transfer failed: status %s, "
+			"actual_length %d.",
+			transfer_status_name(transfer->status),
+			transfer->actual_length);
+	}
+
+	g_free(transfer->buffer);
+	transfer->buffer = NULL;
+	libusb_free_transfer(transfer);
+	devc->status_transfer = NULL;
+	maybe_finish_acquisition(sdi);
+}
+
+static void request_acquisition_status(struct sr_dev_inst *sdi)
+{
+	struct dev_context *devc;
+	struct sr_usb_dev_inst *usb;
+	struct libusb_transfer *transfer;
+	unsigned char *buf;
+	int ret;
+
+	devc = sdi->priv;
+	if (devc->status_requested)
+		return;
+	devc->status_requested = TRUE;
+
+	usb = sdi->conn;
+	if (!usb || !usb->devhdl)
+		return;
+
+	buf = g_try_malloc0(LIBUSB_CONTROL_SETUP_SIZE +
+		sizeof(struct acquisition_status));
+	if (!buf) {
+		sr_err("USB acquisition status buffer malloc failed.");
+		return;
+	}
+
+	transfer = libusb_alloc_transfer(0);
+	if (!transfer) {
+		g_free(buf);
+		return;
+	}
+
+	libusb_fill_control_setup(buf, LIBUSB_REQUEST_TYPE_VENDOR |
+		LIBUSB_ENDPOINT_IN, CMD_GET_ACQ_STATUS, 0x0000, 0x0000,
+		sizeof(struct acquisition_status));
+	libusb_fill_control_transfer(transfer, usb->devhdl, buf,
+		receive_status_transfer, (void *)sdi, USB_TIMEOUT);
+	ret = libusb_submit_transfer(transfer);
+	if (ret != LIBUSB_SUCCESS) {
+		sr_err("Unable to submit acquisition status transfer: %s.",
+			libusb_error_name(ret));
+		libusb_free_transfer(transfer);
+		g_free(buf);
+		return;
+	}
+
+	devc->status_transfer = transfer;
 }
 
 static void send_logic_data(struct sr_dev_inst *sdi, uint8_t *data,
@@ -526,7 +570,7 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer)
 				"received.", devc->empty_transfer_count,
 				transfer_status_name(transfer->status),
 				transfer->actual_length);
-			log_acquisition_status(sdi);
+			request_acquisition_status(sdi);
 			fx3lafw_abort_acquisition(devc);
 			free_transfer(transfer);
 		} else {
@@ -657,6 +701,8 @@ static int start_transfers(const struct sr_dev_inst *sdi)
 	devc->empty_transfer_count = 0;
 	devc->submitted_transfers = 0;
 	devc->num_transfers = NUM_SIMUL_TRANSFERS;
+	devc->status_transfer = NULL;
+	devc->status_requested = FALSE;
 
 	if ((trigger = sr_session_trigger_get(sdi->session))) {
 		int pre_trigger_samples;

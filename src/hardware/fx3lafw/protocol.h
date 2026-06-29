@@ -207,6 +207,8 @@ struct dev_context {
 
 	unsigned int num_transfers;
 	struct libusb_transfer **transfers;
+	struct libusb_transfer *status_transfer;
+	gboolean status_requested;
 	struct sr_context *ctx;
 };
 
