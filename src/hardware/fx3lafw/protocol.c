@@ -35,6 +35,22 @@ struct cmd_start_acquisition {
 	uint8_t sample_delay_l;
 };
 
+struct acquisition_status {
+	uint8_t gpif_stat;
+	uint8_t gpif_state;
+	uint16_t reserved;
+	uint32_t gpif_status;
+	uint32_t gpif_intr;
+	uint32_t pib_intr;
+	uint32_t pib_error;
+	uint32_t pib_sck0_status;
+	uint32_t pib_sck0_intr;
+	uint32_t pib_sck1_status;
+	uint32_t pib_sck1_intr;
+	uint32_t uib_sck2_status;
+	uint32_t uib_sck2_intr;
+};
+
 #pragma pack(pop)
 
 #define USB_TIMEOUT		100
@@ -117,6 +133,61 @@ static int command_stop_acquisition(const struct sr_dev_inst *sdi)
 	}
 
 	return SR_OK;
+}
+
+static int command_get_acquisition_status(const struct sr_dev_inst *sdi,
+		struct acquisition_status *status)
+{
+	struct sr_usb_dev_inst *usb;
+	int ret;
+
+	if (!sdi || !sdi->conn || !status)
+		return SR_ERR_ARG;
+
+	usb = sdi->conn;
+	if (!usb->devhdl)
+		return SR_ERR_ARG;
+
+	ret = libusb_control_transfer(usb->devhdl, LIBUSB_REQUEST_TYPE_VENDOR |
+		LIBUSB_ENDPOINT_IN, CMD_GET_ACQ_STATUS, 0x0000, 0x0000,
+		(unsigned char *)status, sizeof(*status), USB_TIMEOUT);
+	if (ret < 0) {
+		if (ret == LIBUSB_ERROR_PIPE) {
+			sr_dbg("Firmware does not support acquisition status command.");
+			return SR_ERR_NA;
+		}
+		sr_warn("Unable to get acquisition status: %s.",
+			libusb_error_name(ret));
+		return SR_ERR;
+	}
+	if (ret != sizeof(*status)) {
+		sr_warn("Short acquisition status response: %d/%zu bytes.",
+			ret, sizeof(*status));
+		return SR_ERR;
+	}
+
+	return SR_OK;
+}
+
+static void log_acquisition_status(const struct sr_dev_inst *sdi)
+{
+	struct acquisition_status status;
+
+	if (command_get_acquisition_status(sdi, &status) != SR_OK)
+		return;
+
+	sr_err("Acquisition status: gpif_stat=%u gpif_state=%u "
+		"gpif_status=0x%08" PRIx32 " gpif_intr=0x%08" PRIx32
+		" pib_intr=0x%08" PRIx32 " pib_error=0x%08" PRIx32 ".",
+		status.gpif_stat, status.gpif_state, status.gpif_status,
+		status.gpif_intr, status.pib_intr, status.pib_error);
+	sr_err("DMA status: pib0 status=0x%08" PRIx32
+		" intr=0x%08" PRIx32 " pib1 status=0x%08" PRIx32
+		" intr=0x%08" PRIx32 " uib2 status=0x%08" PRIx32
+		" intr=0x%08" PRIx32 ".",
+		status.pib_sck0_status, status.pib_sck0_intr,
+		status.pib_sck1_status, status.pib_sck1_intr,
+		status.uib_sck2_status, status.uib_sck2_intr);
 }
 
 static int command_start_acquisition(const struct sr_dev_inst *sdi)
@@ -455,6 +526,7 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer)
 				"received.", devc->empty_transfer_count,
 				transfer_status_name(transfer->status),
 				transfer->actual_length);
+			log_acquisition_status(sdi);
 			fx3lafw_abort_acquisition(devc);
 			free_transfer(transfer);
 		} else {
