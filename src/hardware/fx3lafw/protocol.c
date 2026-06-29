@@ -367,15 +367,8 @@ SR_PRIV void fx3lafw_abort_acquisition(struct dev_context *devc)
 	}
 }
 
-static void finish_acquisition(struct sr_dev_inst *sdi)
+static void clear_acquisition_allocations(struct dev_context *devc)
 {
-	struct dev_context *devc;
-
-	devc = sdi->priv;
-
-	std_session_send_df_end(sdi);
-	usb_source_remove(sdi->session, devc->ctx);
-
 	devc->num_transfers = 0;
 	g_free(devc->transfers);
 	devc->transfers = NULL;
@@ -384,6 +377,17 @@ static void finish_acquisition(struct sr_dev_inst *sdi)
 		soft_trigger_logic_free(devc->stl);
 		devc->stl = NULL;
 	}
+}
+
+static void finish_acquisition(struct sr_dev_inst *sdi)
+{
+	struct dev_context *devc;
+
+	devc = sdi->priv;
+
+	std_session_send_df_end(sdi);
+	usb_source_remove(sdi->session, devc->ctx);
+	clear_acquisition_allocations(devc);
 }
 
 static void maybe_finish_acquisition(struct sr_dev_inst *sdi)
@@ -784,6 +788,7 @@ static int start_transfers(const struct sr_dev_inst *sdi)
 		devc->num_transfers);
 	if (!devc->transfers) {
 		sr_err("USB transfers malloc failed.");
+		clear_acquisition_allocations(devc);
 		return SR_ERR_MALLOC;
 	}
 
@@ -791,14 +796,20 @@ static int start_transfers(const struct sr_dev_inst *sdi)
 		buf = g_try_malloc(TRANSFER_SIZE);
 		if (!buf) {
 			sr_err("USB transfer buffer malloc failed.");
-			fx3lafw_abort_acquisition(devc);
+			if (devc->submitted_transfers)
+				fx3lafw_abort_acquisition(devc);
+			else
+				clear_acquisition_allocations(devc);
 			return SR_ERR_MALLOC;
 		}
 
 		transfer = libusb_alloc_transfer(0);
 		if (!transfer) {
 			g_free(buf);
-			fx3lafw_abort_acquisition(devc);
+			if (devc->submitted_transfers)
+				fx3lafw_abort_acquisition(devc);
+			else
+				clear_acquisition_allocations(devc);
 			return SR_ERR_MALLOC;
 		}
 
@@ -811,7 +822,10 @@ static int start_transfers(const struct sr_dev_inst *sdi)
 				libusb_error_name(ret));
 			libusb_free_transfer(transfer);
 			g_free(buf);
-			fx3lafw_abort_acquisition(devc);
+			if (devc->submitted_transfers)
+				fx3lafw_abort_acquisition(devc);
+			else
+				clear_acquisition_allocations(devc);
 			return SR_ERR;
 		}
 		devc->transfers[i] = transfer;
