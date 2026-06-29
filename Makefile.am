@@ -382,6 +382,13 @@ src_libdrivers_la_SOURCES += \
 	src/hardware/fx2lafw/protocol.c \
 	src/hardware/fx2lafw/api.c
 endif
+if HW_FX3LAFW
+src_libdrivers_la_SOURCES += \
+	src/hardware/fx3lafw/firmware.h \
+	src/hardware/fx3lafw/protocol.h \
+	src/hardware/fx3lafw/protocol.c \
+	src/hardware/fx3lafw/api.c
+endif
 if HW_GMC_MH_1X_2X
 src_libdrivers_la_SOURCES += \
 	src/hardware/gmc-mh-1x-2x/protocol.h \
@@ -886,6 +893,7 @@ tests_main_SOURCES = \
 	tests/version.c \
 	tests/driver_all.c \
 	tests/device.c \
+	tests/fx3lafw.c \
 	tests/trigger.c \
 	tests/analog.c \
 	tests/conv.c
@@ -1145,4 +1153,3 @@ dist-changelog:
 	else \
 		rm -f .ChangeLog.tmp; exit 1; \
 	fi
-

@@ -43,6 +43,7 @@ int main(void)
 	srunner_add_suite(srunner, suite_strutil());
 	srunner_add_suite(srunner, suite_version());
 	srunner_add_suite(srunner, suite_device());
+	srunner_add_suite(srunner, suite_fx3lafw());
 	srunner_add_suite(srunner, suite_trigger());
 	srunner_add_suite(srunner, suite_analog());
 	srunner_add_suite(srunner, suite_conv());

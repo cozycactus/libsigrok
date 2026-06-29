@@ -53,6 +53,11 @@ The following drivers/devices require a firmware upload upon connection:
    firmware files from the 'sigrok-firmware-fx2lafw' repository/project.
    The firmware is written from scratch and licensed under the GNU GPLv2+.
 
+ - fx3lafw: Logic analyzers based on the Cypress FX3 chip need the
+   'fx3lafw-cypress-fx3.fw' firmware file from the fx3lafw firmware
+   project. The firmware is written from scratch and does not require
+   the Cypress FX3 SDK.
+
  - hantek-6xxx: Certain oscilloscopes based on the Cypress FX2(LP) chip, such
    as the Hantek 6022BE/6022BL, SainSmart DDS120, and Rocktech BM102, need the
    firmware files from the 'sigrok-firmware-fx2lafw' repository/project.
