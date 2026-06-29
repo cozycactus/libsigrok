@@ -87,6 +87,38 @@ static int command_get_revid_version(const struct sr_dev_inst *sdi,
 	return SR_OK;
 }
 
+static int command_stop_acquisition(const struct sr_dev_inst *sdi)
+{
+	struct sr_usb_dev_inst *usb;
+	int ret;
+
+	if (!sdi || !sdi->conn)
+		return SR_ERR_ARG;
+
+	usb = sdi->conn;
+	if (!usb->devhdl)
+		return SR_ERR_ARG;
+
+	ret = libusb_control_transfer(usb->devhdl, LIBUSB_REQUEST_TYPE_VENDOR |
+		LIBUSB_ENDPOINT_OUT, CMD_STOP, 0x0000, 0x0000, NULL, 0,
+		USB_TIMEOUT);
+	if (ret < 0) {
+		if (ret == LIBUSB_ERROR_PIPE) {
+			sr_dbg("Firmware does not support stop command.");
+			return SR_OK;
+		}
+		sr_warn("Unable to send stop command: %s.",
+			libusb_error_name(ret));
+		return SR_ERR;
+	}
+	if (ret != 0) {
+		sr_warn("Unexpected stop command response: %d bytes.", ret);
+		return SR_ERR;
+	}
+
+	return SR_OK;
+}
+
 static int command_start_acquisition(const struct sr_dev_inst *sdi)
 {
 	struct dev_context *devc;
@@ -395,6 +427,9 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer)
 	if (transfer->actual_length == 0 || packet_has_error) {
 		devc->empty_transfer_count++;
 		if (devc->empty_transfer_count > MAX_EMPTY_TRANSFERS) {
+			sr_err("Aborting acquisition after %d empty/error USB "
+				"transfers; requested data was not fully "
+				"received.", devc->empty_transfer_count);
 			fx3lafw_abort_acquisition(devc);
 			free_transfer(transfer);
 		} else {
@@ -479,34 +514,15 @@ check_trigger:
 static int configure_channels(const struct sr_dev_inst *sdi)
 {
 	struct dev_context *devc;
-	const GSList *l;
-	struct sr_channel *ch;
-	int max_enabled_logic;
+	uint8_t unitsize;
+	int ret;
 
 	devc = sdi->priv;
-	max_enabled_logic = -1;
-
-	for (l = sdi->channels; l; l = l->next) {
-		ch = l->data;
-		if (ch->type != SR_CHANNEL_LOGIC || !ch->enabled)
-			continue;
-		if (ch->index > max_enabled_logic)
-			max_enabled_logic = ch->index;
-	}
-
-	if (max_enabled_logic < 0) {
+	if ((ret = fx3lafw_channel_unitsize(sdi, &unitsize)) != SR_OK) {
 		sr_err("Need at least one enabled logic channel.");
-		return SR_ERR;
+		return ret;
 	}
-
-	if (max_enabled_logic > 23)
-		devc->unitsize = 4;
-	else if (max_enabled_logic > 15)
-		devc->unitsize = 3;
-	else if (max_enabled_logic > 7)
-		devc->unitsize = 2;
-	else
-		devc->unitsize = 1;
+	devc->unitsize = unitsize;
 
 	return SR_OK;
 }
@@ -625,6 +641,17 @@ SR_PRIV int fx3lafw_start_acquisition(const struct sr_dev_inst *sdi)
 	if ((ret = configure_channels(sdi)) != SR_OK)
 		return ret;
 
+	if (!fx3lafw_samplerate_supported_for_unitsize(devc->cur_samplerate,
+			devc->unitsize)) {
+		sr_err("%" PRIu64 "Hz exceeds the sustained limit for "
+			"%" PRIu8 "-byte samples; maximum is %" PRIu64 "Hz.",
+			devc->cur_samplerate, devc->unitsize,
+			fx3lafw_max_samplerate_for_unitsize(devc->unitsize));
+		return SR_ERR_SAMPLERATE;
+	}
+
+	(void)command_stop_acquisition(sdi);
+
 	usb_source_add(sdi->session, devc->ctx, TRANSFER_TIMEOUT_MS,
 		receive_data, drvc);
 
@@ -639,6 +666,17 @@ SR_PRIV int fx3lafw_start_acquisition(const struct sr_dev_inst *sdi)
 		fx3lafw_abort_acquisition(devc);
 		return ret;
 	}
+
+	return SR_OK;
+}
+
+SR_PRIV int fx3lafw_stop_acquisition(const struct sr_dev_inst *sdi)
+{
+	if (!sdi || !sdi->priv)
+		return SR_ERR_ARG;
+
+	(void)command_stop_acquisition(sdi);
+	fx3lafw_abort_acquisition(sdi->priv);
 
 	return SR_OK;
 }
