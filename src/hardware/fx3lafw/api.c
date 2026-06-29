@@ -481,6 +481,10 @@ static int config_list(uint32_t key, GVariant **data,
 	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg)
 {
 	struct dev_context *devc;
+	uint64_t *filtered_samplerates;
+	unsigned int filtered_count;
+	uint8_t unitsize;
+	int i;
 
 	devc = (sdi) ? sdi->priv : NULL;
 
@@ -494,8 +498,23 @@ static int config_list(uint32_t key, GVariant **data,
 	case SR_CONF_SAMPLERATE:
 		if (!devc)
 			return SR_ERR_NA;
-		*data = std_gvar_samplerates(devc->samplerates,
-			devc->num_samplerates);
+		if (fx3lafw_channel_unitsize(sdi, &unitsize) != SR_OK) {
+			*data = std_gvar_samplerates(devc->samplerates,
+				devc->num_samplerates);
+			break;
+		}
+
+		filtered_samplerates = g_new(uint64_t, devc->num_samplerates);
+		filtered_count = 0;
+		for (i = 0; i < devc->num_samplerates; i++) {
+			if (fx3lafw_samplerate_supported_for_unitsize(
+					devc->samplerates[i], unitsize))
+				filtered_samplerates[filtered_count++] =
+					devc->samplerates[i];
+		}
+		*data = std_gvar_samplerates(filtered_samplerates,
+			filtered_count);
+		g_free(filtered_samplerates);
 		break;
 	case SR_CONF_TRIGGER_MATCH:
 		*data = std_gvar_array_i32(ARRAY_AND_SIZE(trigger_matches));
@@ -509,12 +528,7 @@ static int config_list(uint32_t key, GVariant **data,
 
 static int dev_acquisition_stop(struct sr_dev_inst *sdi)
 {
-	if (!sdi || !sdi->priv)
-		return SR_ERR_ARG;
-
-	fx3lafw_abort_acquisition(sdi->priv);
-
-	return SR_OK;
+	return fx3lafw_stop_acquisition(sdi);
 }
 
 static struct sr_dev_driver fx3lafw_driver_info = {

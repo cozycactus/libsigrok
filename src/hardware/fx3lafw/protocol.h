@@ -57,6 +57,7 @@
 #define CMD_GET_FW_VERSION		0xb0
 #define CMD_START			0xb1
 #define CMD_GET_REVID_VERSION		0xb2
+#define CMD_STOP			0xb3
 
 #define CMD_START_FLAGS_SUPERWIDE_POS	3
 #define CMD_START_FLAGS_CLK_CTL2_POS	4
@@ -74,6 +75,8 @@
 #define CMD_START_FLAGS_CLK_30MHZ	(0 << CMD_START_FLAGS_CLK_SRC_POS)
 #define CMD_START_FLAGS_CLK_48MHZ	(1 << CMD_START_FLAGS_CLK_SRC_POS)
 #define CMD_START_FLAGS_CLK_192MHZ	(2 << CMD_START_FLAGS_CLK_SRC_POS)
+
+#define FX3LAFW_MAX_SAMPLE_BYTES_PER_SEC	SR_MHZ(256)
 
 static inline int fx3lafw_get_samplerate_params(uint64_t samplerate,
 		uint8_t *clock_flag, uint16_t *sample_delay)
@@ -104,6 +107,58 @@ static inline int fx3lafw_get_samplerate_params(uint64_t samplerate,
 	}
 
 	return SR_ERR_SAMPLERATE;
+}
+
+static inline uint64_t fx3lafw_max_samplerate_for_unitsize(uint8_t unitsize)
+{
+	if (unitsize == 0)
+		return 0;
+
+	return FX3LAFW_MAX_SAMPLE_BYTES_PER_SEC / unitsize;
+}
+
+static inline gboolean fx3lafw_samplerate_supported_for_unitsize(
+		uint64_t samplerate, uint8_t unitsize)
+{
+	uint64_t max_samplerate;
+
+	max_samplerate = fx3lafw_max_samplerate_for_unitsize(unitsize);
+	return max_samplerate && samplerate <= max_samplerate;
+}
+
+static inline int fx3lafw_channel_unitsize(const struct sr_dev_inst *sdi,
+		uint8_t *unitsize)
+{
+	const GSList *l;
+	struct sr_channel *ch;
+	int max_enabled_logic;
+
+	if (!sdi || !unitsize)
+		return SR_ERR_ARG;
+
+	max_enabled_logic = -1;
+
+	for (l = sdi->channels; l; l = l->next) {
+		ch = l->data;
+		if (ch->type != SR_CHANNEL_LOGIC || !ch->enabled)
+			continue;
+		if (ch->index > max_enabled_logic)
+			max_enabled_logic = ch->index;
+	}
+
+	if (max_enabled_logic < 0)
+		return SR_ERR;
+
+	if (max_enabled_logic > 23)
+		*unitsize = 4;
+	else if (max_enabled_logic > 15)
+		*unitsize = 3;
+	else if (max_enabled_logic > 7)
+		*unitsize = 2;
+	else
+		*unitsize = 1;
+
+	return SR_OK;
 }
 
 struct fx3lafw_profile {
@@ -157,6 +212,7 @@ struct dev_context {
 SR_PRIV int fx3lafw_dev_open(struct sr_dev_inst *sdi, struct sr_dev_driver *di);
 SR_PRIV struct dev_context *fx3lafw_dev_new(void);
 SR_PRIV int fx3lafw_start_acquisition(const struct sr_dev_inst *sdi);
+SR_PRIV int fx3lafw_stop_acquisition(const struct sr_dev_inst *sdi);
 SR_PRIV void fx3lafw_abort_acquisition(struct dev_context *devc);
 SR_PRIV int fx3_upload_firmware(struct sr_context *ctx, libusb_device *dev,
 		int configuration, const char *name);

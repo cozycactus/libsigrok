@@ -56,7 +56,9 @@ The following drivers/devices require a firmware upload upon connection:
  - fx3lafw: Logic analyzers based on the Cypress FX3 chip need the
    'fx3lafw-cypress-fx3.fw' firmware file from the fx3lafw firmware
    project. The firmware is written from scratch and does not require
-   the Cypress FX3 SDK.
+   the Cypress FX3 SDK. On the CYUSB3KIT-003, the highest sustained sample
+   rate depends on the enabled channel width: 64MHz for 24 or 32 channels,
+   96MHz for 16 channels, and 192MHz for 8 channels.
 
  - hantek-6xxx: Certain oscilloscopes based on the Cypress FX2(LP) chip, such
    as the Hantek 6022BE/6022BL, SainSmart DDS120, and Rocktech BM102, need the
