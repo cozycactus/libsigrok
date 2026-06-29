@@ -865,6 +865,7 @@ EXTRA_DIST = \
 	contrib/libsigrok.png \
 	contrib/libsigrok.svg \
 	contrib/vnd.sigrok.session.xml \
+	contrib/fx3lafw-stress-matrix.sh \
 	contrib/60-libsigrok.rules \
 	contrib/61-libsigrok-plugdev.rules \
 	contrib/61-libsigrok-uaccess.rules \
