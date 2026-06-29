@@ -65,6 +65,8 @@
 #define CMD_START_FLAGS_WIDE_POS	5
 #define CMD_START_FLAGS_CLK_SRC_POS	6
 
+#define CMD_START_FLAGS_EXT_CLOCK	(1 << 0)
+#define CMD_START_FLAGS_CLK_INVERT	(1 << 1)
 #define CMD_START_FLAGS_CLK_CTL2	(1 << CMD_START_FLAGS_CLK_CTL2_POS)
 #define CMD_START_FLAGS_SAMPLE_8BIT	(0 << CMD_START_FLAGS_WIDE_POS)
 #define CMD_START_FLAGS_SAMPLE_16BIT	(1 << CMD_START_FLAGS_WIDE_POS)
@@ -79,6 +81,11 @@
 #define CMD_START_FLAGS_CLK_80MHZ	(3 << CMD_START_FLAGS_CLK_SRC_POS)
 
 #define FX3LAFW_MAX_SAMPLE_BYTES_PER_SEC	SR_MHZ(320)
+
+enum fx3lafw_clock_edge {
+	FX3LAFW_CLOCK_EDGE_RISING,
+	FX3LAFW_CLOCK_EDGE_FALLING,
+};
 
 static inline int fx3lafw_get_samplerate_params(uint64_t samplerate,
 		uint8_t *clock_flag, uint16_t *sample_delay)
@@ -202,6 +209,8 @@ struct dev_context {
 	uint64_t limit_frames;
 	uint64_t limit_samples;
 	uint64_t capture_ratio;
+	gboolean external_clock;
+	enum fx3lafw_clock_edge clock_edge;
 
 	gboolean trigger_fired;
 	gboolean acq_aborted;

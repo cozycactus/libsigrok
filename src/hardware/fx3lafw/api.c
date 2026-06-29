@@ -48,6 +48,13 @@ static const uint32_t devopts[] = {
 	SR_CONF_SAMPLERATE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
 	SR_CONF_TRIGGER_MATCH | SR_CONF_LIST,
 	SR_CONF_CAPTURE_RATIO | SR_CONF_GET | SR_CONF_SET,
+	SR_CONF_EXTERNAL_CLOCK | SR_CONF_GET | SR_CONF_SET,
+	SR_CONF_CLOCK_EDGE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
+};
+
+static const char *clock_edges[] = {
+	[FX3LAFW_CLOCK_EDGE_RISING] = "rising",
+	[FX3LAFW_CLOCK_EDGE_FALLING] = "falling",
 };
 
 static const int32_t trigger_matches[] = {
@@ -428,6 +435,14 @@ static int config_get(uint32_t key, GVariant **data,
 	case SR_CONF_CAPTURE_RATIO:
 		*data = g_variant_new_uint64(devc->capture_ratio);
 		break;
+	case SR_CONF_EXTERNAL_CLOCK:
+		*data = g_variant_new_boolean(devc->external_clock);
+		break;
+	case SR_CONF_CLOCK_EDGE:
+		if (devc->clock_edge >= ARRAY_SIZE(clock_edges))
+			return SR_ERR_BUG;
+		*data = g_variant_new_string(clock_edges[devc->clock_edge]);
+		break;
 	default:
 		return SR_ERR_NA;
 	}
@@ -453,11 +468,16 @@ static int config_set(uint32_t key, GVariant *data,
 
 	switch (key) {
 	case SR_CONF_SAMPLERATE:
+		value = g_variant_get_uint64(data);
+		if (!value)
+			return SR_ERR_SAMPLERATE;
 		idx = std_u64_idx(data, devc->samplerates,
 			devc->num_samplerates);
-		if (idx < 0)
-			return SR_ERR_ARG;
-		devc->cur_samplerate = devc->samplerates[idx];
+		if (idx >= 0) {
+			devc->cur_samplerate = devc->samplerates[idx];
+			break;
+		}
+		devc->cur_samplerate = value;
 		break;
 	case SR_CONF_LIMIT_FRAMES:
 		devc->limit_frames = g_variant_get_uint64(data);
@@ -471,6 +491,14 @@ static int config_set(uint32_t key, GVariant *data,
 			return SR_ERR_ARG;
 		devc->capture_ratio = value;
 		break;
+	case SR_CONF_EXTERNAL_CLOCK:
+		devc->external_clock = g_variant_get_boolean(data);
+		break;
+	case SR_CONF_CLOCK_EDGE:
+		if ((idx = std_str_idx(data, ARRAY_AND_SIZE(clock_edges))) < 0)
+			return SR_ERR_ARG;
+		devc->clock_edge = idx;
+		break;
 	default:
 		return SR_ERR_NA;
 	}
@@ -483,6 +511,8 @@ static int config_list(uint32_t key, GVariant **data,
 {
 	struct dev_context *devc;
 	uint64_t *filtered_samplerates;
+	uint64_t samplerate_steps[3];
+	uint64_t max_samplerate;
 	unsigned int filtered_count;
 	uint8_t unitsize;
 	int i;
@@ -499,6 +529,18 @@ static int config_list(uint32_t key, GVariant **data,
 	case SR_CONF_SAMPLERATE:
 		if (!devc)
 			return SR_ERR_NA;
+		if (devc->external_clock) {
+			if (fx3lafw_channel_unitsize(sdi, &unitsize) != SR_OK)
+				unitsize = 1;
+			max_samplerate = fx3lafw_max_samplerate_for_unitsize(
+				unitsize);
+			samplerate_steps[0] = 1;
+			samplerate_steps[1] = max_samplerate;
+			samplerate_steps[2] = 1;
+			*data = std_gvar_samplerates_steps(
+				ARRAY_AND_SIZE(samplerate_steps));
+			break;
+		}
 		if (fx3lafw_channel_unitsize(sdi, &unitsize) != SR_OK) {
 			*data = std_gvar_samplerates(devc->samplerates,
 				devc->num_samplerates);
@@ -519,6 +561,9 @@ static int config_list(uint32_t key, GVariant **data,
 		break;
 	case SR_CONF_TRIGGER_MATCH:
 		*data = std_gvar_array_i32(ARRAY_AND_SIZE(trigger_matches));
+		break;
+	case SR_CONF_CLOCK_EDGE:
+		*data = g_variant_new_strv(ARRAY_AND_SIZE(clock_edges));
 		break;
 	default:
 		return SR_ERR_NA;

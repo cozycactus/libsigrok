@@ -635,6 +635,7 @@ static int start_transfers(const struct sr_dev_inst *sdi)
 	struct sr_trigger *trigger;
 	struct libusb_transfer *transfer;
 	unsigned int i, num_transfers;
+	int sample_width;
 	int timeout, ret;
 	unsigned char *buf;
 	size_t size;
@@ -645,12 +646,14 @@ static int start_transfers(const struct sr_dev_inst *sdi)
 	devc->sent_samples = 0;
 	devc->acq_aborted = FALSE;
 	devc->empty_transfer_count = 0;
+	sample_width = devc->sample_wide ? 2 : 1;
 
 	if ((trigger = sr_session_trigger_get(sdi->session))) {
 		int pre_trigger_samples = 0;
 		if (devc->limit_samples > 0)
 			pre_trigger_samples = (devc->capture_ratio * devc->limit_samples) / 100;
-		devc->stl = soft_trigger_logic_new(sdi, trigger, pre_trigger_samples);
+		devc->stl = soft_trigger_logic_new_with_unitsize(sdi, trigger,
+			pre_trigger_samples, sample_width);
 		if (!devc->stl)
 			return SR_ERR_MALLOC;
 		devc->trigger_fired = FALSE;
