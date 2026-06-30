@@ -80,6 +80,11 @@
 #define CMD_START_FLAGS_CLK_192MHZ	(2 << CMD_START_FLAGS_CLK_SRC_POS)
 #define CMD_START_FLAGS_CLK_80MHZ	(3 << CMD_START_FLAGS_CLK_SRC_POS)
 
+/*
+ * Keep the advertised rates within the sustained SuperSpeed bulk payload
+ * budget. The sample width is determined by the highest enabled logic channel,
+ * so 32-bit captures reach this limit at 80MHz (320MB/s).
+ */
 #define FX3LAFW_MAX_SAMPLE_BYTES_PER_SEC	SR_MHZ(320)
 
 enum fx3lafw_clock_edge {
