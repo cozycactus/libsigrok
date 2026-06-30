@@ -36,7 +36,19 @@
 #define MAX_RENUM_DELAY_MS	3000
 #define NUM_SIMUL_TRANSFERS	128
 #define MAX_EMPTY_TRANSFERS	(NUM_SIMUL_TRANSFERS * 2)
-#define TRANSFER_SIZE		(256 * 1024)
+/*
+ * The device streams tightly packed samples (1, 2, 3 or 4 bytes each,
+ * the width follows the highest enabled channel). The per-transfer buffer
+ * must be divisible by the sample width so a full transfer never ends in
+ * the middle of a sample, otherwise the leftover bytes are dropped and
+ * every following sample in the stream is misaligned (notably 24-bit/3-byte
+ * captures). It must also be a multiple of the bulk endpoint's max packet
+ * size (1024 for SuperSpeed, 512 for High-Speed) to avoid overflow on
+ * short reads. 255*1024 (261120) is divisible by 12 (= lcm(3, 4)) and by
+ * 1024; 256*1024 is not divisible by 3. The firmware uses the same rule
+ * for its DMA buffer ("needs to be divisible by 12").
+ */
+#define TRANSFER_SIZE		(255 * 1024)
 #define TRANSFER_TIMEOUT_MS	500
 
 #define FX3LAFW_REQUIRED_VERSION_MAJOR	1
