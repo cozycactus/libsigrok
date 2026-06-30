@@ -12,6 +12,9 @@ RUN_DIR=${FX3_RUN_DIR:-/tmp/fx3lafw-stress-$(date +%Y%m%d-%H%M%S)}
 CPU_JOBS=${FX3_CPU_JOBS:-0}
 DEBUG_PORT=${FX3_DEBUG_PORT:-}
 TRIGGER=${FX3_TRIGGER:-}
+RESET_ON_FAIL=${FX3_RESET_ON_FAIL:-0}
+RESET_TOOL=${FX3_RESET_TOOL:-}
+RESET_CONN=${FX3_RESET_CONN:-}
 
 mkdir -p "$RUN_DIR"
 
@@ -66,6 +69,74 @@ cleanup()
 
 trap cleanup EXIT INT TERM
 
+driver_conn()
+{
+	echo "$DRIVER" | sed -n 's/.*conn=\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p'
+}
+
+scan_conn()
+{
+	label=$1
+	scan_log="$RUN_DIR/recovery-scan-$label.log"
+	new_conn=
+
+	for scan_idx in 1 2 3; do
+		if "$CLI" --scan >"$scan_log" 2>&1; then
+			new_conn=$(sed -n 's/.*fx3lafw:conn=\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' \
+				"$scan_log" | tail -1)
+			if [ -n "$new_conn" ]; then
+				echo "$new_conn"
+				return 0
+			fi
+		fi
+		sleep 1
+	done
+
+	return 1
+}
+
+recover_after_fail()
+{
+	case_label=$(echo "$1" | tr ':/' '__')
+
+	if [ "$RESET_ON_FAIL" != 1 ]; then
+		return
+	fi
+	if [ -z "$RESET_TOOL" ]; then
+		echo "WARN: FX3_RESET_ON_FAIL=1 but FX3_RESET_TOOL is unset" >&2
+		return
+	fi
+
+	reset_conn=$RESET_CONN
+	if [ -z "$reset_conn" ]; then
+		reset_conn=$(driver_conn)
+	fi
+
+	if [ -n "$reset_conn" ]; then
+		echo "INFO: resetting fx3lafw on $reset_conn after failed $1" >&2
+		"$RESET_TOOL" "$reset_conn" >"$RUN_DIR/recovery-reset-$case_label.log" 2>&1 || {
+			echo "WARN: reset tool failed; see $RUN_DIR/recovery-reset-$case_label.log" >&2
+			return
+		}
+	else
+		echo "INFO: resetting first fx3lafw device after failed $1" >&2
+		"$RESET_TOOL" >"$RUN_DIR/recovery-reset-$case_label.log" 2>&1 || {
+			echo "WARN: reset tool failed; see $RUN_DIR/recovery-reset-$case_label.log" >&2
+			return
+		}
+	fi
+
+	new_conn=$(scan_conn "$case_label")
+	if [ -z "$new_conn" ]; then
+		echo "WARN: unable to find fx3lafw after reset; see $RUN_DIR/recovery-scan-$case_label.log" >&2
+		return
+	fi
+
+	DRIVER=fx3lafw:conn=$new_conn
+	RESET_CONN=$new_conn
+	echo "INFO: recovered fx3lafw as $DRIVER" >&2
+}
+
 if [ "$CPU_JOBS" -gt 0 ]; then
 	i=0
 	while [ "$i" -lt "$CPU_JOBS" ]; do
@@ -111,7 +182,18 @@ for case_spec in $CASES; do
 
 	sent=$(sed -n 's/Device only sent \([0-9][0-9]*\) samples\./\1/p' \
 		"$log" | tail -1)
-	if [ "$rc" -eq 0 ] && [ -z "$sent" ]; then
+	if grep -Eq 'Aborting acquisition|empty/error USB transfers|TIMED_OUT|Device only sent|short capture|Failed to|Unable to|LIBUSB_TRANSFER_' "$log"; then
+		result=FAIL
+		if [ -z "$sent" ]; then
+			sent=unknown
+		fi
+	elif [ "$SECONDS_PER_CASE" -gt 5 ] &&
+			[ "$elapsed" -lt $((SECONDS_PER_CASE - SECONDS_PER_CASE / 10)) ]; then
+		result=FAIL
+		if [ -z "$sent" ]; then
+			sent=unknown
+		fi
+	elif [ "$rc" -eq 0 ] && [ -z "$sent" ]; then
 		result=PASS
 		sent=$samples
 	else
@@ -127,6 +209,10 @@ for case_spec in $CASES; do
 		"$(print_pct "$bytes_per_sec" 500000000)" \
 		"$(print_pct "$bytes_per_sec" 625000000)" \
 		"$SECONDS_PER_CASE" "$result" "$elapsed" "$sent" "$samples" "$log"
+
+	if [ "$result" = FAIL ]; then
+		recover_after_fail "$case_spec"
+	fi
 done
 
 echo "RUN_DIR=$RUN_DIR"
