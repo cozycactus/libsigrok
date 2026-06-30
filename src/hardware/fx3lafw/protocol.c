@@ -788,53 +788,77 @@ static int start_transfers(const struct sr_dev_inst *sdi)
 		devc->num_transfers);
 	if (!devc->transfers) {
 		sr_err("USB transfers malloc failed.");
-		clear_acquisition_allocations(devc);
-		return SR_ERR_MALLOC;
+		ret = SR_ERR_MALLOC;
+		goto err;
 	}
 
+	/*
+	 * Allocate every transfer and its buffer before submitting any of
+	 * them. The session core does not pump the USB event loop when an
+	 * acquisition fails to start, so transfers already handed to libusb
+	 * could not be reaped. Allocating up front means the common failure
+	 * (out of memory) leaves nothing in flight and can be freed
+	 * synchronously below.
+	 */
 	for (i = 0; i < devc->num_transfers; i++) {
 		buf = g_try_malloc(TRANSFER_SIZE);
 		if (!buf) {
 			sr_err("USB transfer buffer malloc failed.");
-			if (devc->submitted_transfers)
-				fx3lafw_abort_acquisition(devc);
-			else
-				clear_acquisition_allocations(devc);
-			return SR_ERR_MALLOC;
+			ret = SR_ERR_MALLOC;
+			goto err;
 		}
 
 		transfer = libusb_alloc_transfer(0);
 		if (!transfer) {
 			g_free(buf);
-			if (devc->submitted_transfers)
-				fx3lafw_abort_acquisition(devc);
-			else
-				clear_acquisition_allocations(devc);
-			return SR_ERR_MALLOC;
+			ret = SR_ERR_MALLOC;
+			goto err;
 		}
 
 		libusb_fill_bulk_transfer(transfer, usb->devhdl,
 			USB_EP_DATA_IN, buf, TRANSFER_SIZE,
 			receive_transfer, (void *)sdi, TRANSFER_TIMEOUT_MS);
-		ret = libusb_submit_transfer(transfer);
+		devc->transfers[i] = transfer;
+	}
+
+	for (i = 0; i < devc->num_transfers; i++) {
+		ret = libusb_submit_transfer(devc->transfers[i]);
 		if (ret != 0) {
 			sr_err("Failed to submit transfer: %s.",
 				libusb_error_name(ret));
-			libusb_free_transfer(transfer);
-			g_free(buf);
-			if (devc->submitted_transfers)
-				fx3lafw_abort_acquisition(devc);
-			else
-				clear_acquisition_allocations(devc);
-			return SR_ERR;
+			ret = SR_ERR;
+			goto err;
 		}
-		devc->transfers[i] = transfer;
 		devc->submitted_transfers++;
 	}
 
 	std_session_send_df_header(sdi);
 
 	return SR_OK;
+
+err:
+	/*
+	 * Transfers at and beyond submitted_transfers were allocated but
+	 * never submitted, so free them directly. Lower indices are already
+	 * in flight; cancel them and let their completion callbacks free them
+	 * through finish_acquisition() if the event loop is still running.
+	 */
+	if (devc->transfers) {
+		for (i = devc->submitted_transfers; i < devc->num_transfers; i++) {
+			if (!devc->transfers[i])
+				continue;
+			g_free(devc->transfers[i]->buffer);
+			libusb_free_transfer(devc->transfers[i]);
+			devc->transfers[i] = NULL;
+		}
+	}
+
+	if (devc->submitted_transfers)
+		fx3lafw_abort_acquisition(devc);
+	else
+		clear_acquisition_allocations(devc);
+
+	return ret;
 }
 
 SR_PRIV int fx3lafw_start_acquisition(const struct sr_dev_inst *sdi)
