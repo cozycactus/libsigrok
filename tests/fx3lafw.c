@@ -210,6 +210,18 @@ START_TEST(test_fx3_samplerate_params)
 	fail_unless(clock_flag == CMD_START_FLAGS_CLK_80MHZ);
 	fail_unless(sample_delay == 0);
 
+	ret = fx3lafw_get_samplerate_params(FX3LAFW_89MHZ_SAMPLERATE,
+		&clock_flag, &sample_delay);
+	fail_unless(ret == SR_OK);
+	fail_unless(clock_flag == CMD_START_FLAGS_CLK_89MHZ);
+	fail_unless(sample_delay == 0);
+
+	ret = fx3lafw_get_samplerate_params(SR_MHZ(96), &clock_flag,
+		&sample_delay);
+	fail_unless(ret == SR_OK);
+	fail_unless(clock_flag == CMD_START_FLAGS_CLK_192MHZ);
+	fail_unless(sample_delay == 1);
+
 	ret = fx3lafw_get_samplerate_params(SR_KHZ(123), &clock_flag,
 		&sample_delay);
 	fail_unless(ret == SR_ERR_SAMPLERATE);
@@ -219,7 +231,8 @@ END_TEST
 START_TEST(test_fx3_samplerate_width_limits)
 {
 	fail_unless(fx3lafw_max_samplerate_for_unitsize(4) == SR_MHZ(80));
-	fail_unless(fx3lafw_max_samplerate_for_unitsize(3) == SR_MHZ(80));
+	fail_unless(fx3lafw_max_samplerate_for_unitsize(3) ==
+		FX3LAFW_89MHZ_SAMPLERATE);
 	fail_unless(fx3lafw_max_samplerate_for_unitsize(2) == SR_MHZ(160));
 	fail_unless(fx3lafw_max_samplerate_for_unitsize(1) == SR_MHZ(320));
 	fail_unless(fx3lafw_max_samplerate_for_unitsize(0) == 0);
@@ -229,7 +242,10 @@ START_TEST(test_fx3_samplerate_width_limits)
 	fail_unless(!fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(96), 4));
 	fail_unless(fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(64), 3));
 	fail_unless(fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(80), 3));
+	fail_unless(fx3lafw_samplerate_supported_for_unitsize(
+		FX3LAFW_89MHZ_SAMPLERATE, 3));
 	fail_unless(!fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(96), 3));
+	fail_unless(!fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(192), 3));
 	fail_unless(fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(96), 2));
 	fail_unless(!fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(192), 2));
 	fail_unless(fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(192), 1));

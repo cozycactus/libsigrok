@@ -91,6 +91,10 @@
 #define CMD_START_FLAGS_CLK_48MHZ	(1 << CMD_START_FLAGS_CLK_SRC_POS)
 #define CMD_START_FLAGS_CLK_192MHZ	(2 << CMD_START_FLAGS_CLK_SRC_POS)
 #define CMD_START_FLAGS_CLK_80MHZ	(3 << CMD_START_FLAGS_CLK_SRC_POS)
+#define CMD_START_FLAGS_CLK_89MHZ	(CMD_START_FLAGS_CLK_CTL2 | \
+					 CMD_START_FLAGS_CLK_192MHZ)
+
+#define FX3LAFW_89MHZ_SAMPLERATE	SR_HZ(89600000)
 
 /*
  * Keep the advertised rates within the sustained SuperSpeed bulk payload
@@ -114,6 +118,7 @@ static inline int fx3lafw_get_samplerate_params(uint64_t samplerate,
 		{ SR_MHZ(48), CMD_START_FLAGS_CLK_48MHZ },
 		{ SR_MHZ(30), CMD_START_FLAGS_CLK_30MHZ },
 		{ SR_MHZ(80), CMD_START_FLAGS_CLK_80MHZ },
+		{ FX3LAFW_89MHZ_SAMPLERATE, CMD_START_FLAGS_CLK_89MHZ },
 		{ SR_MHZ(192), CMD_START_FLAGS_CLK_192MHZ },
 	};
 	uint64_t divisor;
@@ -143,6 +148,7 @@ static inline uint64_t fx3lafw_max_samplerate_for_unitsize(uint8_t unitsize)
 	case 2:
 		return FX3LAFW_MAX_SAMPLE_BYTES_PER_SEC / unitsize;
 	case 3:
+		return FX3LAFW_89MHZ_SAMPLERATE;
 	case 4:
 		return SR_MHZ(80);
 	default:

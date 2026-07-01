@@ -82,6 +82,7 @@ static const uint64_t samplerates[] = {
 	SR_MHZ(48),
 	SR_MHZ(64),
 	SR_MHZ(80),
+	FX3LAFW_89MHZ_SAMPLERATE,
 	SR_MHZ(96),
 	SR_MHZ(192),
 };
