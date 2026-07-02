@@ -97,15 +97,15 @@
 #define FX3LAFW_89MHZ_SAMPLERATE	SR_HZ(89600000)
 
 /*
- * Keep the advertised rates within the sustained SuperSpeed bulk payload
- * budget for 1- and 2-byte samples. The sample width is determined by the
- * highest enabled logic channel. 3- and 4-byte samples are further capped
- * at 89.6MHz: the GPIF data-write path cannot push multiple bytes per
- * clock above that rate (91.2MHz already faults with THR_WR_OVERRUN),
- * while 268.8MB/s (24-bit) and 358.4MB/s (32-bit) both stream clean at
- * 89.6MHz.
+ * Keep the advertised rates to modes the firmware can generate and sustain.
+ * The sample width is determined by the highest enabled logic channel.
+ * 24- and 32-bit captures are capped at 89.6MHz: the GPIF data-write path
+ * cannot push multiple bytes per clock above that rate (91.2MHz already
+ * faults with THR_WR_OVERRUN), while 268.8MB/s (24-bit) and 358.4MB/s
+ * (32-bit) both stream clean at 89.6MHz.
  */
-#define FX3LAFW_MAX_SAMPLE_BYTES_PER_SEC	SR_MHZ(320)
+#define FX3LAFW_MAX_8BIT_SAMPLERATE	SR_MHZ(192)
+#define FX3LAFW_MAX_16BIT_SAMPLERATE	SR_MHZ(96)
 
 enum fx3lafw_clock_edge {
 	FX3LAFW_CLOCK_EDGE_RISING,
@@ -149,8 +149,9 @@ static inline uint64_t fx3lafw_max_samplerate_for_unitsize(uint8_t unitsize)
 {
 	switch (unitsize) {
 	case 1:
+		return FX3LAFW_MAX_8BIT_SAMPLERATE;
 	case 2:
-		return FX3LAFW_MAX_SAMPLE_BYTES_PER_SEC / unitsize;
+		return FX3LAFW_MAX_16BIT_SAMPLERATE;
 	case 3:
 		return FX3LAFW_89MHZ_SAMPLERATE;
 	case 4:
