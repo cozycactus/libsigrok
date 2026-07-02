@@ -316,7 +316,7 @@ static GSource *usb_source_new(struct sr_session *session,
 SR_PRIV int sr_usb_split_conn(const char *conn,
 	uint16_t *vid, uint16_t *pid, uint8_t *bus, uint8_t *addr)
 {
-	gboolean valid;
+	gboolean matched, valid;
 	GRegex *reg;
 	GMatchInfo *match;
 	char *mstr;
@@ -327,10 +327,12 @@ SR_PRIV int sr_usb_split_conn(const char *conn,
 	if (bus) *bus = 0;
 	if (addr) *addr = 0;
 
+	matched = FALSE;
 	valid = TRUE;
 	reg = g_regex_new(CONN_USB_VIDPID, 0, 0, NULL);
 	if (g_regex_match(reg, conn, 0, &match)) {
 		/* Found a VID:PID style pattern. */
+		matched = TRUE;
 		if ((mstr = g_match_info_fetch(match, 1))) {
 			num = strtoul(mstr, NULL, 16);
 			if (num > 0xffff)
@@ -354,6 +356,7 @@ SR_PRIV int sr_usb_split_conn(const char *conn,
 		reg = g_regex_new(CONN_USB_BUSADDR, 0, 0, NULL);
 		if (g_regex_match(reg, conn, 0, &match)) {
 			/* Found a bus.address style pattern. */
+			matched = TRUE;
 			if ((mstr = g_match_info_fetch(match, 1))) {
 				num = strtoul(mstr, NULL, 10);
 				if (num > 255)
@@ -365,7 +368,7 @@ SR_PRIV int sr_usb_split_conn(const char *conn,
 
 			if ((mstr = g_match_info_fetch(match, 2))) {
 				num = strtoul(mstr, NULL, 10);
-				if (num > 127)
+				if (num == 0 || num > 127)
 					valid = FALSE;
 				if (addr)
 					*addr = num & 0x7f;
@@ -376,7 +379,7 @@ SR_PRIV int sr_usb_split_conn(const char *conn,
 	g_match_info_unref(match);
 	g_regex_unref(reg);
 
-	return valid ? SR_OK : SR_ERR_ARG;
+	return matched && valid ? SR_OK : SR_ERR_ARG;
 }
 
 /**
@@ -405,7 +408,7 @@ SR_PRIV GSList *sr_usb_find(libusb_context *usb_ctx, const char *conn)
 		sr_err("Invalid input, or neither VID:PID nor bus.address specified.");
 		return NULL;
 	}
-	if (!(vid && pid) && !(bus && addr)) {
+	if (!(vid && pid) && !addr) {
 		sr_err("Could neither determine VID:PID nor bus.address numbers.");
 		return NULL;
 	}
@@ -425,7 +428,7 @@ SR_PRIV GSList *sr_usb_find(libusb_context *usb_ctx, const char *conn)
 
 		b = libusb_get_bus_number(devlist[i]);
 		a = libusb_get_device_address(devlist[i]);
-		if (bus && addr && (b != bus || a != addr))
+		if (addr && (b != bus || a != addr))
 			continue;
 
 		sr_dbg("Found USB device (VID:PID = %04x:%04x, bus.address = "
