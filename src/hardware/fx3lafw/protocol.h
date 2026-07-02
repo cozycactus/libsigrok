@@ -37,6 +37,14 @@
 #define NUM_SIMUL_TRANSFERS	128
 #define MAX_EMPTY_TRANSFERS	(NUM_SIMUL_TRANSFERS * 2)
 /*
+ * After this many consecutive empty transfers, ask the device whether it
+ * hit a hardware fault (PIB error) so a wedged acquisition fails within
+ * a second instead of waiting out MAX_EMPTY_TRANSFERS worth of timeouts.
+ * Kept small but nonzero: a capture legitimately waiting for a trigger
+ * also produces empty transfers, and that case must keep waiting.
+ */
+#define EARLY_ERROR_CHECK_EMPTY_TRANSFERS	8
+/*
  * The device streams tightly packed samples (1, 2, 3 or 4 bytes each,
  * the width follows the highest enabled channel). The per-transfer buffer
  * must be divisible by the sample width so a full transfer never ends in
@@ -254,6 +262,7 @@ struct dev_context {
 	struct libusb_transfer **transfers;
 	struct libusb_transfer *status_transfer;
 	gboolean status_requested;
+	gboolean error_check_done;
 	struct sr_context *ctx;
 };
 

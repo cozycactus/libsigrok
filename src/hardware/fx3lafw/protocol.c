@@ -522,7 +522,8 @@ static void LIBUSB_CALL receive_status_transfer(struct libusb_transfer *transfer
 	maybe_finish_acquisition(sdi);
 }
 
-static void request_acquisition_status(struct sr_dev_inst *sdi)
+static void submit_status_transfer(struct sr_dev_inst *sdi,
+	libusb_transfer_cb_fn callback)
 {
 	struct dev_context *devc;
 	struct sr_usb_dev_inst *usb;
@@ -531,9 +532,8 @@ static void request_acquisition_status(struct sr_dev_inst *sdi)
 	int ret;
 
 	devc = sdi->priv;
-	if (devc->status_requested)
+	if (devc->status_transfer)
 		return;
-	devc->status_requested = TRUE;
 
 	usb = sdi->conn;
 	if (!usb || !usb->devhdl)
@@ -556,7 +556,7 @@ static void request_acquisition_status(struct sr_dev_inst *sdi)
 		LIBUSB_ENDPOINT_IN, CMD_GET_ACQ_STATUS, 0x0000, 0x0000,
 		sizeof(struct acquisition_status));
 	libusb_fill_control_transfer(transfer, usb->devhdl, buf,
-		receive_status_transfer, (void *)sdi, USB_TIMEOUT);
+		callback, (void *)sdi, USB_TIMEOUT);
 	ret = libusb_submit_transfer(transfer);
 	if (ret != LIBUSB_SUCCESS) {
 		sr_err("Unable to submit acquisition status transfer: %s.",
@@ -567,6 +567,54 @@ static void request_acquisition_status(struct sr_dev_inst *sdi)
 	}
 
 	devc->status_transfer = transfer;
+}
+
+static void request_acquisition_status(struct sr_dev_inst *sdi)
+{
+	struct dev_context *devc;
+
+	devc = sdi->priv;
+	if (devc->status_requested)
+		return;
+	devc->status_requested = TRUE;
+
+	submit_status_transfer(sdi, receive_status_transfer);
+}
+
+static void LIBUSB_CALL receive_error_check_transfer(
+	struct libusb_transfer *transfer)
+{
+	struct sr_dev_inst *sdi;
+	struct dev_context *devc;
+	struct acquisition_status *status;
+
+	sdi = transfer->user_data;
+	devc = sdi->priv;
+
+	if (transfer->status == LIBUSB_TRANSFER_COMPLETED &&
+			transfer->actual_length == sizeof(*status)) {
+		status = (struct acquisition_status *)
+			libusb_control_transfer_get_data(transfer);
+		if (status->pib_error) {
+			sr_err("Device reported an acquisition fault "
+				"(PIB_ERROR=0x%08" PRIx32 "); aborting instead "
+				"of waiting out the remaining USB timeouts.",
+				status->pib_error);
+			log_acquisition_status(status);
+			fx3lafw_abort_acquisition(devc);
+		}
+	} else {
+		sr_dbg("Early error check transfer failed: status %s, "
+			"actual_length %d.",
+			transfer_status_name(transfer->status),
+			transfer->actual_length);
+	}
+
+	g_free(transfer->buffer);
+	transfer->buffer = NULL;
+	libusb_free_transfer(transfer);
+	devc->status_transfer = NULL;
+	maybe_finish_acquisition(sdi);
 }
 
 static void send_logic_data(struct sr_dev_inst *sdi, uint8_t *data,
@@ -626,6 +674,13 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer)
 
 	if (transfer->actual_length == 0 || packet_has_error) {
 		devc->empty_transfer_count++;
+		if (devc->empty_transfer_count >=
+				EARLY_ERROR_CHECK_EMPTY_TRANSFERS &&
+				!devc->error_check_done) {
+			devc->error_check_done = TRUE;
+			submit_status_transfer(sdi,
+				receive_error_check_transfer);
+		}
 		if (devc->empty_transfer_count > MAX_EMPTY_TRANSFERS) {
 			sr_err("Aborting acquisition after %d empty/error USB "
 				"transfers; last transfer status %s, "
@@ -642,6 +697,7 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer)
 		return;
 	}
 	devc->empty_transfer_count = 0;
+	devc->error_check_done = FALSE;
 
 check_trigger:
 	if (devc->trigger_fired) {
@@ -766,6 +822,7 @@ static int start_transfers(const struct sr_dev_inst *sdi)
 	devc->num_transfers = NUM_SIMUL_TRANSFERS;
 	devc->status_transfer = NULL;
 	devc->status_requested = FALSE;
+	devc->error_check_done = FALSE;
 
 	if ((trigger = sr_session_trigger_get(sdi->session))) {
 		int pre_trigger_samples;
