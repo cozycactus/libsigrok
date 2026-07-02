@@ -91,13 +91,28 @@
 #define CMD_START_FLAGS_CLK_48MHZ	(1 << CMD_START_FLAGS_CLK_SRC_POS)
 #define CMD_START_FLAGS_CLK_192MHZ	(2 << CMD_START_FLAGS_CLK_SRC_POS)
 #define CMD_START_FLAGS_CLK_80MHZ	(3 << CMD_START_FLAGS_CLK_SRC_POS)
+#define CMD_START_FLAGS_CLK_89MHZ	(CMD_START_FLAGS_CLK_CTL2 | \
+					 CMD_START_FLAGS_CLK_192MHZ)
+
+#define FX3LAFW_89MHZ_SAMPLERATE	SR_HZ(89600000)
 
 /*
- * Keep the advertised rates within the sustained SuperSpeed bulk payload
- * budget. The sample width is determined by the highest enabled logic channel,
- * so 32-bit captures reach this limit at 80MHz (320MB/s).
+ * Keep the advertised rates to modes the firmware can generate and sustain.
+ * The sample width is determined by the highest enabled logic channel.
+ * Keep wide captures below the rates which can overflow the FX3/host USB
+ * pipeline on common hosts. The firmware can generate 89.6MHz, but sustained
+ * 24- and 32-bit captures need more headroom than the narrow modes.
  */
-#define FX3LAFW_MAX_SAMPLE_BYTES_PER_SEC	SR_MHZ(320)
+#define FX3LAFW_MAX_8BIT_SAMPLERATE	SR_MHZ(192)
+#define FX3LAFW_MAX_16BIT_SAMPLERATE	SR_MHZ(96)
+#define FX3LAFW_MAX_24BIT_SAMPLERATE	SR_MHZ(80)
+#define FX3LAFW_MAX_32BIT_SAMPLERATE	SR_MHZ(64)
+/*
+ * USB 2.0 high-speed bulk transfers top out well below the raw 480Mbit/s
+ * line rate, and hub paths tend to be worse. Keep the advertised limits
+ * conservative when the device did not enumerate at SuperSpeed.
+ */
+#define FX3LAFW_MAX_HIGHSPEED_SAMPLE_BYTES_PER_SEC	SR_MHZ(32)
 
 enum fx3lafw_clock_edge {
 	FX3LAFW_CLOCK_EDGE_RISING,
@@ -114,6 +129,7 @@ static inline int fx3lafw_get_samplerate_params(uint64_t samplerate,
 		{ SR_MHZ(48), CMD_START_FLAGS_CLK_48MHZ },
 		{ SR_MHZ(30), CMD_START_FLAGS_CLK_30MHZ },
 		{ SR_MHZ(80), CMD_START_FLAGS_CLK_80MHZ },
+		{ FX3LAFW_89MHZ_SAMPLERATE, CMD_START_FLAGS_CLK_89MHZ },
 		{ SR_MHZ(192), CMD_START_FLAGS_CLK_192MHZ },
 	};
 	uint64_t divisor;
@@ -140,14 +156,58 @@ static inline uint64_t fx3lafw_max_samplerate_for_unitsize(uint8_t unitsize)
 {
 	switch (unitsize) {
 	case 1:
+		return FX3LAFW_MAX_8BIT_SAMPLERATE;
 	case 2:
-		return FX3LAFW_MAX_SAMPLE_BYTES_PER_SEC / unitsize;
+		return FX3LAFW_MAX_16BIT_SAMPLERATE;
 	case 3:
+		return FX3LAFW_MAX_24BIT_SAMPLERATE;
 	case 4:
-		return SR_MHZ(80);
+		return FX3LAFW_MAX_32BIT_SAMPLERATE;
 	default:
 		return 0;
 	}
+}
+
+static inline gboolean fx3lafw_usb_speed_is_superspeed(int usb_speed)
+{
+	return usb_speed >= LIBUSB_SPEED_SUPER;
+}
+
+static inline const char *fx3lafw_usb_speed_name(int usb_speed)
+{
+	switch (usb_speed) {
+	case LIBUSB_SPEED_LOW:
+		return "low-speed";
+	case LIBUSB_SPEED_FULL:
+		return "full-speed";
+	case LIBUSB_SPEED_HIGH:
+		return "high-speed";
+	case LIBUSB_SPEED_SUPER:
+		return "SuperSpeed";
+	default:
+		if (usb_speed > LIBUSB_SPEED_SUPER)
+			return "SuperSpeedPlus";
+		return "unknown";
+	}
+}
+
+static inline uint64_t fx3lafw_max_samplerate_for_usb_speed(uint8_t unitsize,
+		int usb_speed)
+{
+	uint64_t device_limit, usb_limit;
+
+	device_limit = fx3lafw_max_samplerate_for_unitsize(unitsize);
+	if (!device_limit)
+		return 0;
+
+	if (fx3lafw_usb_speed_is_superspeed(usb_speed) ||
+			usb_speed == LIBUSB_SPEED_UNKNOWN)
+		return device_limit;
+	if (usb_speed != LIBUSB_SPEED_HIGH)
+		return 0;
+
+	usb_limit = FX3LAFW_MAX_HIGHSPEED_SAMPLE_BYTES_PER_SEC / unitsize;
+	return MIN(device_limit, usb_limit);
 }
 
 static inline gboolean fx3lafw_samplerate_supported_for_unitsize(
@@ -156,6 +216,16 @@ static inline gboolean fx3lafw_samplerate_supported_for_unitsize(
 	uint64_t max_samplerate;
 
 	max_samplerate = fx3lafw_max_samplerate_for_unitsize(unitsize);
+	return max_samplerate && samplerate <= max_samplerate;
+}
+
+static inline gboolean fx3lafw_samplerate_supported_for_usb_speed(
+		uint64_t samplerate, uint8_t unitsize, int usb_speed)
+{
+	uint64_t max_samplerate;
+
+	max_samplerate = fx3lafw_max_samplerate_for_usb_speed(unitsize,
+		usb_speed);
 	return max_samplerate && samplerate <= max_samplerate;
 }
 
@@ -228,6 +298,7 @@ struct dev_context {
 	uint64_t capture_ratio;
 	gboolean external_clock;
 	enum fx3lafw_clock_edge clock_edge;
+	int usb_speed;
 
 	gboolean trigger_fired;
 	gboolean acq_aborted;

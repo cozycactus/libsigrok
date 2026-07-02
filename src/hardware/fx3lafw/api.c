@@ -82,6 +82,7 @@ static const uint64_t samplerates[] = {
 	SR_MHZ(48),
 	SR_MHZ(64),
 	SR_MHZ(80),
+	FX3LAFW_89MHZ_SAMPLERATE,
 	SR_MHZ(96),
 	SR_MHZ(192),
 };
@@ -260,6 +261,7 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 		devc->profile = profile;
 		devc->samplerates = samplerates;
 		devc->num_samplerates = ARRAY_SIZE(samplerates);
+		devc->usb_speed = libusb_get_device_speed(devlist[i]);
 		sdi->priv = devc;
 		devices = g_slist_append(devices, sdi);
 
@@ -532,8 +534,8 @@ static int config_list(uint32_t key, GVariant **data,
 		if (devc->external_clock) {
 			if (fx3lafw_channel_unitsize(sdi, &unitsize) != SR_OK)
 				unitsize = 1;
-			max_samplerate = fx3lafw_max_samplerate_for_unitsize(
-				unitsize);
+			max_samplerate = fx3lafw_max_samplerate_for_usb_speed(
+				unitsize, devc->usb_speed);
 			samplerate_steps[0] = 1;
 			samplerate_steps[1] = max_samplerate;
 			samplerate_steps[2] = 1;
@@ -550,8 +552,9 @@ static int config_list(uint32_t key, GVariant **data,
 		filtered_samplerates = g_new(uint64_t, devc->num_samplerates);
 		filtered_count = 0;
 		for (i = 0; i < devc->num_samplerates; i++) {
-			if (fx3lafw_samplerate_supported_for_unitsize(
-					devc->samplerates[i], unitsize))
+			if (fx3lafw_samplerate_supported_for_usb_speed(
+					devc->samplerates[i], unitsize,
+					devc->usb_speed))
 				filtered_samplerates[filtered_count++] =
 					devc->samplerates[i];
 		}

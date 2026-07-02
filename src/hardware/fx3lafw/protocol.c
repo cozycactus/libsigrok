@@ -318,10 +318,19 @@ SR_PRIV int fx3lafw_dev_open(struct sr_dev_inst *sdi, struct sr_dev_driver *di)
 			break;
 		}
 
+		devc->usb_speed = libusb_get_device_speed(devlist[i]);
+		if (devc->usb_speed != LIBUSB_SPEED_UNKNOWN &&
+				!fx3lafw_usb_speed_is_superspeed(devc->usb_speed)) {
+			sr_warn("Device is connected at USB %s; high-rate "
+				"captures are limited by the USB link speed.",
+				fx3lafw_usb_speed_name(devc->usb_speed));
+		}
+
 		sr_info("Opened device on %d.%d (logical) / %s (physical), "
-			"interface %d, firmware %d.%d, REVID=%d.",
+			"interface %d, firmware %d.%d, REVID=%d, USB %s.",
 			usb->bus, usb->address, connection_id, USB_INTERFACE,
-			vi.major, vi.minor, revid);
+			vi.major, vi.minor, revid,
+			fx3lafw_usb_speed_name(devc->usb_speed));
 		ret = SR_OK;
 		break;
 	}
@@ -349,6 +358,7 @@ SR_PRIV struct dev_context *fx3lafw_dev_new(void)
 	devc->capture_ratio = 0;
 	devc->external_clock = FALSE;
 	devc->clock_edge = FX3LAFW_CLOCK_EDGE_RISING;
+	devc->usb_speed = LIBUSB_SPEED_UNKNOWN;
 	devc->unitsize = 1;
 	devc->stl = NULL;
 
@@ -866,6 +876,7 @@ SR_PRIV int fx3lafw_start_acquisition(const struct sr_dev_inst *sdi)
 	struct sr_dev_driver *di;
 	struct drv_context *drvc;
 	struct dev_context *devc;
+	uint64_t max_samplerate;
 	int ret;
 
 	di = sdi->driver;
@@ -881,12 +892,17 @@ SR_PRIV int fx3lafw_start_acquisition(const struct sr_dev_inst *sdi)
 	if ((ret = configure_channels(sdi)) != SR_OK)
 		return ret;
 
-	if (!fx3lafw_samplerate_supported_for_unitsize(devc->cur_samplerate,
-			devc->unitsize)) {
-		sr_err("%" PRIu64 "Hz exceeds the sustained limit for "
-			"%" PRIu8 "-byte samples; maximum is %" PRIu64 "Hz.",
+	max_samplerate = fx3lafw_max_samplerate_for_usb_speed(devc->unitsize,
+		devc->usb_speed);
+	if (!fx3lafw_samplerate_supported_for_usb_speed(
 			devc->cur_samplerate, devc->unitsize,
-			fx3lafw_max_samplerate_for_unitsize(devc->unitsize));
+			devc->usb_speed)) {
+		sr_err("%" PRIu64 "Hz exceeds the sustained limit for "
+			"%" PRIu8 "-byte samples over USB %s; maximum is "
+			"%" PRIu64 "Hz.",
+			devc->cur_samplerate, devc->unitsize,
+			fx3lafw_usb_speed_name(devc->usb_speed),
+			max_samplerate);
 		return SR_ERR_SAMPLERATE;
 	}
 

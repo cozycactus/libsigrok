@@ -210,6 +210,18 @@ START_TEST(test_fx3_samplerate_params)
 	fail_unless(clock_flag == CMD_START_FLAGS_CLK_80MHZ);
 	fail_unless(sample_delay == 0);
 
+	ret = fx3lafw_get_samplerate_params(FX3LAFW_89MHZ_SAMPLERATE,
+		&clock_flag, &sample_delay);
+	fail_unless(ret == SR_OK);
+	fail_unless(clock_flag == CMD_START_FLAGS_CLK_89MHZ);
+	fail_unless(sample_delay == 0);
+
+	ret = fx3lafw_get_samplerate_params(SR_MHZ(96), &clock_flag,
+		&sample_delay);
+	fail_unless(ret == SR_OK);
+	fail_unless(clock_flag == CMD_START_FLAGS_CLK_192MHZ);
+	fail_unless(sample_delay == 1);
+
 	ret = fx3lafw_get_samplerate_params(SR_KHZ(123), &clock_flag,
 		&sample_delay);
 	fail_unless(ret == SR_ERR_SAMPLERATE);
@@ -218,21 +230,67 @@ END_TEST
 
 START_TEST(test_fx3_samplerate_width_limits)
 {
-	fail_unless(fx3lafw_max_samplerate_for_unitsize(4) == SR_MHZ(80));
-	fail_unless(fx3lafw_max_samplerate_for_unitsize(3) == SR_MHZ(80));
-	fail_unless(fx3lafw_max_samplerate_for_unitsize(2) == SR_MHZ(160));
-	fail_unless(fx3lafw_max_samplerate_for_unitsize(1) == SR_MHZ(320));
+	fail_unless(fx3lafw_max_samplerate_for_unitsize(4) ==
+		FX3LAFW_MAX_32BIT_SAMPLERATE);
+	fail_unless(fx3lafw_max_samplerate_for_unitsize(3) ==
+		FX3LAFW_MAX_24BIT_SAMPLERATE);
+	fail_unless(fx3lafw_max_samplerate_for_unitsize(2) == SR_MHZ(96));
+	fail_unless(fx3lafw_max_samplerate_for_unitsize(1) == SR_MHZ(192));
 	fail_unless(fx3lafw_max_samplerate_for_unitsize(0) == 0);
 
 	fail_unless(fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(64), 4));
-	fail_unless(fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(80), 4));
+	fail_unless(!fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(80), 4));
+	fail_unless(!fx3lafw_samplerate_supported_for_unitsize(
+		FX3LAFW_89MHZ_SAMPLERATE, 4));
 	fail_unless(!fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(96), 4));
 	fail_unless(fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(64), 3));
 	fail_unless(fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(80), 3));
+	fail_unless(!fx3lafw_samplerate_supported_for_unitsize(
+		FX3LAFW_89MHZ_SAMPLERATE, 3));
 	fail_unless(!fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(96), 3));
+	fail_unless(!fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(192), 3));
 	fail_unless(fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(96), 2));
+	fail_unless(!fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(160), 2));
 	fail_unless(!fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(192), 2));
 	fail_unless(fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(192), 1));
+	fail_unless(!fx3lafw_samplerate_supported_for_unitsize(SR_MHZ(320), 1));
+}
+END_TEST
+
+START_TEST(test_fx3_samplerate_usb_speed_limits)
+{
+	fail_unless(fx3lafw_max_samplerate_for_usb_speed(4,
+		LIBUSB_SPEED_SUPER) == FX3LAFW_MAX_32BIT_SAMPLERATE);
+	fail_unless(fx3lafw_max_samplerate_for_usb_speed(3,
+		LIBUSB_SPEED_SUPER) == FX3LAFW_MAX_24BIT_SAMPLERATE);
+	fail_unless(fx3lafw_max_samplerate_for_usb_speed(4,
+		LIBUSB_SPEED_HIGH) == SR_MHZ(8));
+	fail_unless(fx3lafw_max_samplerate_for_usb_speed(3,
+		LIBUSB_SPEED_HIGH) ==
+		FX3LAFW_MAX_HIGHSPEED_SAMPLE_BYTES_PER_SEC / 3);
+	fail_unless(fx3lafw_max_samplerate_for_usb_speed(2,
+		LIBUSB_SPEED_HIGH) == SR_MHZ(16));
+	fail_unless(fx3lafw_max_samplerate_for_usb_speed(1,
+		LIBUSB_SPEED_HIGH) == SR_MHZ(32));
+	fail_unless(fx3lafw_max_samplerate_for_usb_speed(0,
+		LIBUSB_SPEED_HIGH) == 0);
+
+	fail_unless(fx3lafw_samplerate_supported_for_usb_speed(SR_MHZ(8),
+		4, LIBUSB_SPEED_HIGH));
+	fail_unless(!fx3lafw_samplerate_supported_for_usb_speed(SR_MHZ(12),
+		4, LIBUSB_SPEED_HIGH));
+	fail_unless(fx3lafw_samplerate_supported_for_usb_speed(SR_MHZ(8),
+		3, LIBUSB_SPEED_HIGH));
+	fail_unless(!fx3lafw_samplerate_supported_for_usb_speed(SR_MHZ(12),
+		3, LIBUSB_SPEED_HIGH));
+	fail_unless(fx3lafw_samplerate_supported_for_usb_speed(SR_MHZ(16),
+		2, LIBUSB_SPEED_HIGH));
+	fail_unless(!fx3lafw_samplerate_supported_for_usb_speed(SR_MHZ(24),
+		2, LIBUSB_SPEED_HIGH));
+	fail_unless(fx3lafw_samplerate_supported_for_usb_speed(SR_MHZ(32),
+		1, LIBUSB_SPEED_HIGH));
+	fail_unless(!fx3lafw_samplerate_supported_for_usb_speed(SR_MHZ(48),
+		1, LIBUSB_SPEED_HIGH));
 }
 END_TEST
 
@@ -290,6 +348,7 @@ Suite *suite_fx3lafw(void)
 	tc = tcase_create("protocol");
 	tcase_add_test(tc, test_fx3_samplerate_params);
 	tcase_add_test(tc, test_fx3_samplerate_width_limits);
+	tcase_add_test(tc, test_fx3_samplerate_usb_speed_limits);
 	tcase_add_test(tc, test_fx3_channel_unitsize);
 	suite_add_tcase(s, tc);
 
