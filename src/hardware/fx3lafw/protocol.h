@@ -98,8 +98,12 @@
 
 /*
  * Keep the advertised rates within the sustained SuperSpeed bulk payload
- * budget. The sample width is determined by the highest enabled logic channel,
- * so 32-bit captures reach this limit at 80MHz (320MB/s).
+ * budget for 1- and 2-byte samples. The sample width is determined by the
+ * highest enabled logic channel. 3- and 4-byte samples are further capped
+ * at 89.6MHz: the GPIF data-write path cannot push multiple bytes per
+ * clock above that rate (91.2MHz already faults with THR_WR_OVERRUN),
+ * while 268.8MB/s (24-bit) and 358.4MB/s (32-bit) both stream clean at
+ * 89.6MHz.
  */
 #define FX3LAFW_MAX_SAMPLE_BYTES_PER_SEC	SR_MHZ(320)
 
@@ -150,7 +154,7 @@ static inline uint64_t fx3lafw_max_samplerate_for_unitsize(uint8_t unitsize)
 	case 3:
 		return FX3LAFW_89MHZ_SAMPLERATE;
 	case 4:
-		return SR_MHZ(80);
+		return FX3LAFW_89MHZ_SAMPLERATE;
 	default:
 		return 0;
 	}
