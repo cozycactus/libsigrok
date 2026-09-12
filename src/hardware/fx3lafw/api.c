@@ -311,7 +311,9 @@ static int dev_open(struct sr_dev_inst *sdi)
 {
 	struct sr_dev_driver *di;
 	struct sr_usb_dev_inst *usb;
+	struct drv_context *drvc;
 	struct dev_context *devc;
+	struct timeval tv;
 	int ret;
 	int64_t timediff_us, timediff_ms;
 
@@ -319,6 +321,7 @@ static int dev_open(struct sr_dev_inst *sdi)
 		return SR_ERR_ARG;
 
 	di = sdi->driver;
+	drvc = di->context;
 	devc = sdi->priv;
 	usb = sdi->conn;
 	if (!devc || !usb)
@@ -330,6 +333,11 @@ static int dev_open(struct sr_dev_inst *sdi)
 		g_usleep(300 * 1000);
 		timediff_ms = 0;
 		while (timediff_ms < MAX_RENUM_DELAY_MS) {
+			tv.tv_sec = 0;
+			tv.tv_usec = 10000;
+			libusb_handle_events_timeout_completed(
+				drvc->sr_ctx->libusb_ctx, &tv, NULL);
+
 			ret = fx3lafw_dev_open(sdi, di);
 			if (ret == SR_OK)
 				break;
