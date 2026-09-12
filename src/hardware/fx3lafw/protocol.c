@@ -405,7 +405,8 @@ static void maybe_finish_acquisition(struct sr_dev_inst *sdi)
 	struct dev_context *devc;
 
 	devc = sdi->priv;
-	if (devc->submitted_transfers == 0 && !devc->status_transfer)
+	if (devc->submitted_transfers == 0 && !devc->status_transfer &&
+			!devc->stop_transfer)
 		finish_acquisition(sdi);
 }
 
@@ -627,6 +628,55 @@ static void LIBUSB_CALL receive_error_check_transfer(
 	maybe_finish_acquisition(sdi);
 }
 
+/* Keep bulk reads queued until the device has stopped producing samples. */
+static void LIBUSB_CALL receive_stop_transfer(struct libusb_transfer *transfer)
+{
+	struct sr_dev_inst *sdi = transfer->user_data;
+	struct dev_context *devc = sdi->priv;
+
+	if (transfer->status != LIBUSB_TRANSFER_COMPLETED)
+		sr_warn("Asynchronous STOP failed: %s.",
+			transfer_status_name(transfer->status));
+	g_free(transfer->buffer);
+	libusb_free_transfer(transfer);
+	devc->stop_transfer = NULL;
+	fx3lafw_abort_acquisition(devc);
+	maybe_finish_acquisition(sdi);
+}
+
+static gboolean submit_stop_transfer(struct sr_dev_inst *sdi)
+{
+	struct dev_context *devc = sdi->priv;
+	struct sr_usb_dev_inst *usb = sdi->conn;
+	struct libusb_transfer *transfer;
+	unsigned char *buffer;
+	int ret;
+
+	transfer = libusb_alloc_transfer(0);
+	buffer = g_try_malloc0(LIBUSB_CONTROL_SETUP_SIZE);
+	if (!transfer || !buffer) {
+		libusb_free_transfer(transfer);
+		g_free(buffer);
+		sr_err("Unable to allocate asynchronous STOP.");
+		return FALSE;
+	}
+	libusb_fill_control_setup(buffer, LIBUSB_REQUEST_TYPE_VENDOR |
+		LIBUSB_ENDPOINT_OUT, CMD_STOP, 0, 0, 0);
+	libusb_fill_control_transfer(transfer, usb->devhdl, buffer,
+		receive_stop_transfer, sdi, USB_TIMEOUT);
+	devc->stop_transfer = transfer;
+	ret = libusb_submit_transfer(transfer);
+	if (ret != LIBUSB_SUCCESS) {
+		devc->stop_transfer = NULL;
+		g_free(buffer);
+		libusb_free_transfer(transfer);
+		sr_err("Unable to submit asynchronous STOP: %s.",
+			libusb_error_name(ret));
+		return FALSE;
+	}
+	return TRUE;
+}
+
 static void send_logic_data(struct sr_dev_inst *sdi, uint8_t *data,
 		size_t length, size_t sample_width)
 {
@@ -659,6 +709,10 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer)
 
 	if (devc->acq_aborted) {
 		free_transfer(transfer);
+		return;
+	}
+	if (devc->stop_transfer) {
+		resubmit_transfer(transfer);
 		return;
 	}
 
@@ -774,7 +828,8 @@ check_trigger:
 	}
 
 	if (frame_ended && final_frame) {
-		fx3lafw_abort_acquisition(devc);
+		if (!submit_stop_transfer(sdi))
+			fx3lafw_abort_acquisition(devc);
 		free_transfer(transfer);
 	} else {
 		resubmit_transfer(transfer);

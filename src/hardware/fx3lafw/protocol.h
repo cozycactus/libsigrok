@@ -321,6 +321,7 @@ struct dev_context {
 	unsigned int num_transfers;
 	struct libusb_transfer **transfers;
 	struct libusb_transfer *status_transfer;
+	struct libusb_transfer *stop_transfer;
 	gboolean status_requested;
 	gboolean error_check_done;
 	struct sr_context *ctx;
