@@ -275,7 +275,8 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 		}
 
 		has_firmware = usb_match_manuf_prod(devlist[i],
-			"sigrok", "fx3lafw");
+			"sigrok", "fx3lafw") ||
+			usb_match_manuf_prod(devlist[i], "sigrok", "fx3ulpifw");
 		if (has_firmware) {
 			sr_dbg("Found an fx3lafw device.");
 			sdi->status = SR_ST_INACTIVE;
