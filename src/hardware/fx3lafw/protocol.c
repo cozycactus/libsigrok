@@ -820,6 +820,10 @@ static int start_transfers(const struct sr_dev_inst *sdi)
 	struct libusb_transfer *transfer;
 	unsigned char *buf;
 	unsigned int i;
+	unsigned int transfer_timeout = TRANSFER_TIMEOUT_MS;
+#ifdef _WIN32
+	uint64_t bytes_per_sec, queue_ms;
+#endif
 	int ret;
 
 	devc = sdi->priv;
@@ -830,6 +834,20 @@ static int start_transfers(const struct sr_dev_inst *sdi)
 	devc->empty_transfer_count = 0;
 	devc->submitted_transfers = 0;
 	devc->num_transfers = NUM_SIMUL_TRANSFERS;
+#ifdef _WIN32
+	/* WinUSB deadlines include time queued behind other reads. Keep
+	 * about 100 ms in flight and allow the entire queue to drain before
+	 * any transfer times out. Slow rates still need at least two buffers.
+	 */
+	bytes_per_sec = devc->cur_samplerate * devc->unitsize;
+	devc->num_transfers = MIN(NUM_SIMUL_TRANSFERS,
+		MAX(UINT64_C(2), bytes_per_sec / (10 * TRANSFER_SIZE)));
+	queue_ms = ((uint64_t)devc->num_transfers * TRANSFER_SIZE * 1000
+		+ bytes_per_sec - 1) / bytes_per_sec;
+	transfer_timeout += queue_ms;
+	sr_dbg("Windows USB queue: %u transfers, %u ms timeout.",
+		devc->num_transfers, transfer_timeout);
+#endif
 	devc->status_transfer = NULL;
 	devc->status_requested = FALSE;
 	devc->error_check_done = FALSE;
@@ -884,7 +902,7 @@ static int start_transfers(const struct sr_dev_inst *sdi)
 
 		libusb_fill_bulk_transfer(transfer, usb->devhdl,
 			USB_EP_DATA_IN, buf, TRANSFER_SIZE,
-			receive_transfer, (void *)sdi, TRANSFER_TIMEOUT_MS);
+			receive_transfer, (void *)sdi, transfer_timeout);
 		devc->transfers[i] = transfer;
 	}
 
@@ -965,8 +983,10 @@ SR_PRIV int fx3lafw_start_acquisition(const struct sr_dev_inst *sdi)
 
 	(void)command_stop_acquisition(sdi);
 
-	usb_source_add(sdi->session, devc->ctx, TRANSFER_TIMEOUT_MS,
+	ret = usb_source_add(sdi->session, devc->ctx, TRANSFER_TIMEOUT_MS,
 		receive_data, drvc);
+	if (ret != SR_OK)
+		return ret;
 
 	ret = start_transfers(sdi);
 	if (ret != SR_OK) {
