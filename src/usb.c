@@ -263,8 +263,17 @@ static GSource *usb_source_new(struct sr_session *session,
 
 	upollfds = libusb_get_pollfds(usb_ctx);
 	if (!upollfds) {
+#ifdef _WIN32
+		/* Stock Windows libusb has no poll descriptors. Dispatch at
+		 * least every millisecond so completed transfers are serviced,
+		 * including when the caller requested an infinite timeout.
+		 */
+		if (timeout_ms < 0 || timeout_ms > 1)
+			timeout_ms = 1;
+#else
 		sr_err("Failed to get libusb file descriptors.");
 		return NULL;
+#endif
 	}
 	source = g_source_new(&usb_source_funcs, sizeof(struct usb_source));
 	usource = (struct usb_source *)source;
@@ -282,7 +291,7 @@ static GSource *usb_source_new(struct sr_session *session,
 	usource->usb_ctx = usb_ctx;
 	usource->pollfds = g_ptr_array_new_full(8, &usb_source_free_pollfd);
 
-	for (upfd = upollfds; *upfd != NULL; upfd++)
+	for (upfd = upollfds; upfd && *upfd != NULL; upfd++)
 		usb_pollfd_added((*upfd)->fd, (*upfd)->events, usource);
 
 #if (LIBUSB_API_VERSION >= 0x01000104)
